@@ -1,0 +1,15 @@
+# Compiled binary
+media-pause
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Temporary files
+*.swp
+*.swo
+*~
+/tmp/
