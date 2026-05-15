@@ -1,0 +1,191 @@
+#!/bin/bash
+# Shared library for media-pause Raycast commands (bash 3.2 compatible)
+
+CACHE_DIR="$HOME/.cache/media-pause"
+PIDFILE="/tmp/media-pause.pid"
+STATUSFILE="/tmp/media-pause.status"
+
+# ── Binary discovery ──────────────────────────────────
+find_bin() {
+    command -v media-pause 2>/dev/null && return
+    for p in /opt/homebrew/bin /usr/local/bin "$HOME/bin"; do
+        [ -x "$p/media-pause" ] && echo "$p/media-pause" && return
+    done
+}
+
+# ── App name mapping (bash 3.2, no associative arrays) ──
+app_name() {
+    case "$1" in
+        chrome)   echo "Google Chrome.app" ;;
+        brave)    echo "Brave Browser.app" ;;
+        edge)     echo "Microsoft Edge.app" ;;
+        arc)      echo "Arc.app" ;;
+        chromium) echo "Chromium.app" ;;
+        opera)    echo "Opera.app" ;;
+        vivaldi)  echo "Vivaldi.app" ;;
+        *)        echo "" ;;
+    esac
+}
+
+is_installed() {
+    [ -d "/Applications/$1" ] || [ -d "$HOME/Applications/$1" ]
+}
+
+detect_installed() {
+    local found=""
+    for key in chrome brave edge arc chromium opera vivaldi; do
+        if is_installed "$(app_name "$key")"; then
+            found="$found,$key"
+        fi
+    done
+    echo "${found#,}"
+}
+
+# ── Browser resolution ────────────────────────────────
+resolve_browsers() {
+    local input="$1" installed="$2" result="" key
+    [ "$input" = "all" ] && { echo "$installed"; return; }
+    local old_ifs="$IFS"; IFS=','
+    for key in $input; do
+        key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
+        [ "$key" = "all" ] && { echo "$installed"; IFS="$old_ifs"; return; }
+        if echo ",$installed," | grep -q ",$key,"; then
+            result="$result,$key"
+        fi
+    done
+    IFS="$old_ifs"
+    echo "${result#,}"
+}
+
+# ── Browser memory ─────────────────────────────────────
+remember_browser() {
+    mkdir -p "$CACHE_DIR"
+    echo "$1" > "$CACHE_DIR/last-browser"
+}
+
+recall_browser() {
+    [ -f "$CACHE_DIR/last-browser" ] && cat "$CACHE_DIR/last-browser" || echo "chrome"
+}
+
+# ── Duration parsing (for status display) ──────────────
+parse_duration_seconds() {
+    local input="$1" total=0
+    # Try plain seconds first
+    if echo "$input" | grep -qE '^[0-9]+$'; then
+        echo "$input"
+        return
+    fi
+    # Extract each unit independently (avoids sed greedy-matching issues)
+    local h=$(echo "$input" | grep -oE '[0-9]+h' | sed 's/h//')
+    local m=$(echo "$input" | grep -oE '[0-9]+m' | sed 's/m//')
+    local s=$(echo "$input" | grep -oE '[0-9]+s' | sed 's/s//')
+    [ -n "$h" ] && total=$((total + h * 3600))
+    [ -n "$m" ] && total=$((total + m * 60))
+    [ -n "$s" ] && total=$((total + s))
+    echo "$total"
+}
+
+# ── Core: launch timer ──────────────────────────────────
+launch_timer() {
+    local mode="$1" duration="$2" user_browser="$3" mode_flag="$4" mode_label="$5"
+
+    local installed=$(detect_installed)
+    local default_browser=$(recall_browser)
+
+    # Resolve browser: user input > remembered default > chrome
+    local input="${user_browser:-$default_browser}"
+    [ -z "$input" ] && input="chrome"
+    local browsers=$(resolve_browsers "$input" "$installed")
+
+    if [ -z "$browsers" ]; then
+        echo "No supported browser found. Installed: ${installed:-none}"
+        exit 1
+    fi
+
+    # Remember for next time (only if user explicitly chose)
+    if [ -n "$user_browser" ]; then
+        remember_browser "$user_browser"
+    fi
+
+    local num=$(echo "$browsers" | tr ',' '\n' | wc -l | tr -d ' ')
+    local label=$(echo "$browsers" | tr ',' ', ')
+    local dur_sec=$(parse_duration_seconds "$duration")
+    local bin=$(find_bin)
+
+    if [ -z "$bin" ]; then
+        echo "media-pause not found. Install: brew install bjorn/homebrew-tap/media-pause"
+        exit 1
+    fi
+
+    # ── Launch ──────────────────────────────────────────
+    "$bin" $mode_flag -b "$browsers" "$duration" >/dev/null 2>&1 &
+    local pid=$!
+    echo "$pid" > "$PIDFILE"
+
+    # Write status metadata for progress display
+    echo "$(date +%s) $dur_sec $mode_label $label" > "$STATUSFILE"
+
+    osascript -e "
+        display notification \"$duration countdown started for $label\"
+        with title \"media-pause — $mode_label\"
+        subtitle \"Timer running\"
+    " 2>/dev/null
+
+    # Background watcher: poll until PID exits, then notify & cleanup
+    (
+        while kill -0 "$pid" 2>/dev/null; do sleep 1; done
+        rm -f "$PIDFILE" "$STATUSFILE"
+        osascript -e "
+            display notification \"Done — media action completed for $label\"
+            with title \"media-pause — $mode_label\"
+            subtitle \"Countdown finished\"
+        " 2>/dev/null
+    ) &
+    disown
+
+    echo "$mode_label: $duration → $num browser(s) ($label)  |  Status: run 'Media Pause Status'"
+}
+
+# ── Status: progress display ───────────────────────────
+show_status() {
+    if [ ! -f "$PIDFILE" ] || [ ! -f "$STATUSFILE" ]; then
+        echo "No media-pause timer is running."
+        return
+    fi
+
+    local pid=$(cat "$PIDFILE" 2>/dev/null)
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$PIDFILE" "$STATUSFILE"
+        echo "No media-pause timer is running."
+        return
+    fi
+
+    # Parse metadata
+    local meta=$(cat "$STATUSFILE")
+    local start_ts=$(echo "$meta" | awk '{print $1}')
+    local total_sec=$(echo "$meta" | awk '{print $2}')
+    local mode_label=$(echo "$meta" | awk '{print $3}')
+    local label=$(echo "$meta" | awk '{for(i=4;i<=NF;i++) printf "%s%s", $i, (i<NF?" ":"")}')
+
+    local now=$(date +%s)
+    local elapsed=$((now - start_ts))
+    local remaining=$((total_sec - elapsed))
+    [ $remaining -lt 0 ] && remaining=0
+
+    # Format times
+    local fmt_elapsed=$(printf "%02d:%02d:%02d" $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60)))
+    local fmt_remain=$(printf "%02d:%02d:%02d" $((remaining/3600)) $(((remaining%3600)/60)) $((remaining%60)))
+    local pct=0
+    [ "$total_sec" -gt 0 ] && pct=$(( elapsed * 100 / total_sec ))
+    [ $pct -gt 100 ] && pct=100
+
+    # Progress bar (30 chars wide)
+    local bar_w=20
+    local filled=$(( pct * bar_w / 100 ))
+    local empty=$(( bar_w - filled ))
+    local bar=$(printf "%${filled}s" | sed 's/ /█/g')$(printf "%${empty}s" | sed 's/ /░/g')
+
+    echo "$mode_label · $label"
+    echo "$bar ${pct}%"
+    echo "⏳ $fmt_remain remaining   ⏱ $fmt_elapsed elapsed"
+}
