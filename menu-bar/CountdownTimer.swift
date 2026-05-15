@@ -13,6 +13,7 @@ final class TimerState: ObservableObject {
     @Published var progress: Double = 0
 
     private var timer: Timer?
+    var onUpdate: ((String, Bool) -> Void)?
 
     private let pidFile = "/tmp/media-pause.pid"
     private let statusFile = "/tmp/media-pause.status"
@@ -25,7 +26,6 @@ final class TimerState: ObservableObject {
     }
 
     private func tick() {
-        // Read PID file — contains "<pid> <instance_id>"
         guard let pidRaw = try? String(contentsOfFile: pidFile, encoding: .utf8) else {
             setNotRunning()
             return
@@ -40,7 +40,6 @@ final class TimerState: ObservableObject {
         }
         let pidInstance = String(pidFields[1])
 
-        // Read status file — contains "<start_ts> <total_sec> <mode> <label> <instance_id>"
         guard let raw = try? String(contentsOfFile: statusFile, encoding: .utf8) else {
             setNotRunning()
             return
@@ -49,7 +48,6 @@ final class TimerState: ObservableObject {
             .split(separator: " ", omittingEmptySubsequences: true)
         guard allParts.count >= 5 else { setNotRunning(); return }
 
-        // Validate instance IDs match to prevent stale data
         guard String(allParts.last!) == pidInstance else { setNotRunning(); return }
 
         let startTs = TimeInterval(allParts[0]) ?? 0
@@ -70,6 +68,8 @@ final class TimerState: ObservableObject {
         progress = totalSec > 0 ? min(elapsedSec / totalSec, 1.0) : 0
         displayText = formatShort(remainingSec)
         isRunning = true
+
+        onUpdate?(displayText, true)
     }
 
     private func setNotRunning() {
@@ -80,6 +80,7 @@ final class TimerState: ObservableObject {
         remaining = ""
         elapsed = ""
         progress = 0
+        onUpdate?("", false)
     }
 
     private func formatTime(_ sec: TimeInterval) -> String {
@@ -110,8 +111,118 @@ final class TimerState: ObservableObject {
 // MARK: - App Delegate
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem!
+    private var menu: NSMenu!
+    private var state: TimerState!
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        state = TimerState()
+
+        // Font matching system menu bar clock
+        let menuBarFont = NSFont.menuBarFont(ofSize: 0)
+        let monoFont = NSFont.monospacedDigitSystemFont(ofSize: menuBarFont.pointSize, weight: .regular)
+
+        // Measure exact width of "00:00:00" for fixed-length status item
+        let sampleText = "00:00:00" as NSString
+        let textWidth = sampleText.size(withAttributes: [.font: monoFont]).width.rounded(.up)
+
+        // Status item — hidden when idle, fixed width when running
+        statusItem = NSStatusBar.system.statusItem(withLength: textWidth)
+        if let button = statusItem.button {
+            button.font = monoFont
+            button.alignment = .center
+            button.title = ""
+        }
+        statusItem.isVisible = false
+
+        // Build menu
+        menu = NSMenu()
+        updateMenu()
+        statusItem.menu = menu
+
+        // Receive state updates
+        state.onUpdate = { [weak self] text, running in
+            if running {
+                self?.statusItem.isVisible = true
+                self?.statusItem.length = textWidth
+                self?.statusItem.button?.title = text
+            } else {
+                self?.statusItem.isVisible = false
+                self?.statusItem.button?.title = ""
+            }
+            self?.updateMenu()
+        }
+    }
+
+    private func updateMenu() {
+        menu.removeAllItems()
+
+        if state.isRunning {
+            let headerItem = NSMenuItem()
+            headerItem.title = "\(modeIcon(state.modeLabel)) \(state.modeLabel) \u{00B7} \(state.label)"
+            headerItem.isEnabled = false
+            menu.addItem(headerItem)
+
+            // Progress bar via a disabled item with a visual representation
+            let barItem = NSMenuItem()
+            let barW = 20
+            let filled = Int(state.progress * Double(barW))
+            let empty = barW - filled
+            let bar = String(repeating: "\u{2588}", count: max(0, filled)) + String(repeating: "\u{2591}", count: max(0, empty))
+            barItem.title = "\(bar) \(Int(state.progress * 100))%"
+            barItem.isEnabled = false
+            menu.addItem(barItem)
+
+            menu.addItem(NSMenuItem.separator())
+
+            let remainItem = NSMenuItem()
+            remainItem.title = "Remaining   \(state.remaining)"
+            remainItem.isEnabled = false
+            menu.addItem(remainItem)
+
+            let elapsedItem = NSMenuItem()
+            elapsedItem.title = "Elapsed      \(state.elapsed)"
+            elapsedItem.isEnabled = false
+            menu.addItem(elapsedItem)
+
+            menu.addItem(NSMenuItem.separator())
+
+            let stopItem = NSMenuItem(title: "Stop Timer", action: #selector(stopAction), keyEquivalent: "")
+            stopItem.target = self
+            menu.addItem(stopItem)
+        } else {
+            let idleItem = NSMenuItem()
+            idleItem.title = "No timer running"
+            idleItem.isEnabled = false
+            menu.addItem(idleItem)
+        }
+
+        menu.addItem(NSMenuItem.separator())
+
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(quitAction), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+    }
+
+    @objc private func stopAction() {
+        state.stopTimer()
+    }
+
+    @objc private func quitAction() {
+        NSApplication.shared.terminate(nil)
+    }
+
+    private func modeIcon(_ mode: String) -> String {
+        switch mode.lowercased() {
+        case "pause":  return "\u{23F8}"
+        case "resume": return "\u{25B6}"
+        case "mute":   return "\u{1F507}"
+        case "quit":   return "\u{23FB}"
+        case "key":    return "\u{2328}"
+        default:       return "\u{23F3}"
+        }
     }
 }
 
@@ -120,69 +231,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct CountdownTimerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var state = TimerState()
 
     var body: some Scene {
-        MenuBarExtra {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(modeIcon(state.modeLabel))
-                    Text("\(state.modeLabel) · \(state.label)")
-                        .fontWeight(.semibold)
-                }
-                ProgressView(value: state.progress, total: 1.0)
-                    .tint(progressColor)
-                HStack {
-                    Text("Remaining")
-                    Spacer()
-                    Text(state.remaining)
-                        .monospacedDigit()
-                        .fontWeight(.medium)
-                }
-                HStack {
-                    Text("Elapsed")
-                    Spacer()
-                    Text(state.elapsed)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-                Divider()
-                Button("Stop Timer") {
-                    state.stopTimer()
-                }
-                Button("Quit") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .keyboardShortcut("q")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(width: 200)
-        } label: {
-            if state.isRunning {
-                Text(state.displayText)
-                    .font(.system(size: NSFont.systemFontSize, design: .monospaced))
-            } else {
-                Text("⏳")
-            }
-        }
-        .menuBarExtraStyle(.menu)
-    }
-
-    private var progressColor: Color {
-        if state.progress >= 0.9 { return .red }
-        if state.progress >= 0.5 { return .yellow }
-        return .accentColor
-    }
-
-    private func modeIcon(_ mode: String) -> String {
-        switch mode.lowercased() {
-        case "pause":  return "⏸"
-        case "resume": return "▶"
-        case "mute":   return "🔇"
-        case "quit":   return "⏻"
-        case "key":    return "⌨"
-        default:       return "⏳"
+        Settings {
+            EmptyView()
         }
     }
 }
