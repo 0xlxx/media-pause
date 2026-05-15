@@ -2,15 +2,15 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title Media PlayPause
+# @raycast.title Play/Pause Key
 # @raycast.mode compact
-# @raycast.icon icon.png
-# @raycast.packageName Media Tools
-# @raycast.description Countdown then send system play/pause key (works with any app)
+# @raycast.icon icon-key.png
+# @raycast.packageName Media Timer
+# @raycast.description Countdown then send system play/pause key (works with any app: Spotify, Music, VLC...)
 
 # Optional parameters:
 # @raycast.author bjorn
-# @raycast.keywords timer playpause media key spotify music
+# @raycast.keywords timer playpause media key spotify music countdown
 
 # Arguments:
 # @raycast.argument1 { "type": "text", "placeholder": "Duration: 30m | 1h | 2h (default 1h)", "optional": true }
@@ -20,7 +20,9 @@ DURATION="${1:-1h}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$DIR/_media-pause-lib.sh"
 
-# Prevent duplicate timers
+PIDFILE="/tmp/media-pause.pid"
+STATUSFILE="/tmp/media-pause.status"
+
 CURRENT=$(read_current_timer)
 if [ -n "$CURRENT" ]; then
     OLD_META=$(cat "$STATUSFILE" 2>/dev/null)
@@ -33,7 +35,7 @@ if [ -n "$CURRENT" ]; then
     [ $OLD_REMAIN -lt 0 ] && OLD_REMAIN=0
     OLD_FMT=$(printf "%02d:%02d" $((OLD_REMAIN/60)) $((OLD_REMAIN%60)))
     echo "Timer already running: $OLD_MODE · $OLD_LABEL · ${OLD_FMT}m remaining"
-    echo "Stop it first: run 'Media Pause Stop'"
+    echo "Stop it first: run 'Timer Stop'"
     exit 1
 fi
 
@@ -48,11 +50,11 @@ INSTANCE_ID="$(date +%s).$$"
 "$BIN" -p "$DURATION" >/dev/null 2>&1 &
 PID=$!
 echo "$PID $INSTANCE_ID" > "$PIDFILE"
-echo "$(date +%s) $DUR_SEC PlayPause system $INSTANCE_ID" > "$STATUSFILE"
+echo "$(date +%s) $DUR_SEC Key system $INSTANCE_ID" > "$STATUSFILE"
 
 osascript -e "
     display notification \"$DURATION countdown started\"
-    with title \"media-pause — PlayPause\"
+    with title \"Play/Pause Key\"
     subtitle \"Timer running\"
 " 2>/dev/null
 
@@ -64,11 +66,11 @@ osascript -e "
         rm -f "$PIDFILE" "$STATUSFILE"
         osascript -e "
             display notification \"Done — media key sent\"
-            with title \"media-pause — PlayPause\"
+            with title \"Play/Pause Key\"
             subtitle \"Countdown finished\"
         " 2>/dev/null
     fi
 ) &
 disown
 
-echo "PlayPause: $DURATION → system media key  |  Status: run 'Media Pause Status'"
+echo "Playing/Pausing in $DURATION  |  Status: run 'Timer Status'"

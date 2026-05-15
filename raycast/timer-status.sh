@@ -2,15 +2,15 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title Media Pause Status
+# @raycast.title Timer Status
 # @raycast.mode compact
 # @raycast.icon icon-status.png
-# @raycast.packageName Media Tools
+# @raycast.packageName Media Timer
 # @raycast.description Show running timer progress with elapsed/remaining time
 
 # Optional parameters:
 # @raycast.author bjorn
-# @raycast.keywords status timer progress running check
+# @raycast.keywords timer status progress running check remaining
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$DIR/_media-pause-lib.sh"

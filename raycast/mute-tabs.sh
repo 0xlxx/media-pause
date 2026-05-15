@@ -2,15 +2,15 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title Media Quit
+# @raycast.title Mute Tabs
 # @raycast.mode compact
-# @raycast.icon icon.png
-# @raycast.packageName Media Tools
-# @raycast.description Countdown then quit the browser entirely
+# @raycast.icon icon-mute.png
+# @raycast.packageName Media Timer
+# @raycast.description Countdown then mute audible browser tabs
 
 # Optional parameters:
 # @raycast.author bjorn
-# @raycast.keywords timer quit close browser shutdown
+# @raycast.keywords timer mute silent audio sound browser countdown
 
 # Arguments:
 # @raycast.argument1 { "type": "text", "placeholder": "Duration: 15m | 30m | 1h | 2h (default 1h)", "optional": true }
@@ -22,4 +22,4 @@ BROWSER="${2}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$DIR/_media-pause-lib.sh"
 
-launch_timer "quit" "$DURATION" "$BROWSER" "-q" "Quit"
+launch_timer "mute" "$DURATION" "$BROWSER" "-m" "Mute"

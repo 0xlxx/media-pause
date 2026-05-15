@@ -2,15 +2,15 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title Media Pause Stop
+# @raycast.title Timer Stop
 # @raycast.mode compact
-# @raycast.icon icon.png
-# @raycast.packageName Media Tools
-# @raycast.description Stop the currently running media-pause timer
+# @raycast.icon icon-stop.png
+# @raycast.packageName Media Timer
+# @raycast.description Stop the currently running timer
 
 # Optional parameters:
 # @raycast.author bjorn
-# @raycast.keywords stop cancel abort kill timer
+# @raycast.keywords timer stop cancel abort kill
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$DIR/_media-pause-lib.sh"
@@ -30,12 +30,10 @@ if [ -z "$PID" ] || ! kill -0 "$PID" 2>/dev/null; then
     exit 0
 fi
 
-# Read what we're stopping
 META=$(cat "$STATUSFILE" 2>/dev/null)
 MODE=$(echo "$META" | awk '{print $3}')
 LABEL=$(echo "$META" | awk '{for(i=4;i<=NF-1;i++) printf "%s%s", $i, (i<NF-1?" ":"")}')
 
-# Kill the timer and all descendants (the watcher)
 kill -TERM "$PID" 2>/dev/null
 sleep 0.3
 kill -KILL "$PID" 2>/dev/null
@@ -43,8 +41,8 @@ rm -f "$PIDFILE" "$STATUSFILE"
 
 osascript -e "
     display notification \"Timer cancelled\"
-    with title \"media-pause — Stopped\"
+    with title \"Timer Stopped\"
     subtitle \"$MODE · $LABEL\"
 " 2>/dev/null
 
-echo "Stopped: $MODE · $LABEL"
+echo "Stopped ($MODE · $LABEL)"
