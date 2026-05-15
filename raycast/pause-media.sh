@@ -38,7 +38,12 @@ if [ -z "$BIN" ]; then
 fi
 
 if [ -z "$DURATION" ]; then
-    # Immediate pause, no timer
+    # Immediate pause — stop any running timer first
+    CURRENT=$(read_current_timer)
+    if [ -n "$CURRENT" ]; then
+        STOP_PID=$(echo "$CURRENT" | awk '{print $1}')
+        stop_timer "$STOP_PID"
+    fi
     LABEL=$(echo "$BROWSERS" | tr ',' ', ')
     "$BIN" -b "$BROWSERS" "1s" >/dev/null 2>&1 &
     echo "Paused $LABEL"
