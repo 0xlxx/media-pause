@@ -47,6 +47,8 @@ fi
 DUR_SEC=$(parse_duration_seconds "$DURATION")
 INSTANCE_ID="$(date +%s).$$"
 
+ensure_menubar
+
 "$BIN" -p "$DURATION" >/dev/null 2>&1 &
 PID=$!
 echo "$PID $INSTANCE_ID" > "$PIDFILE"

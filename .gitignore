@@ -8,6 +8,9 @@ media-pause
 Icon
 ._*
 
+# Menu bar build artifacts
+menu-bar/CountdownTimer.app/
+
 # Temporary files
 *.swp
 *.swo

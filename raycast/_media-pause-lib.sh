@@ -111,6 +111,20 @@ stop_timer() {
     rm -f "$PIDFILE" "$STATUSFILE"
 }
 
+# ── Menu bar app ───────────────────────────────────────
+ensure_menubar() {
+    # Already running?
+    pgrep -f "CountdownTimer.app" >/dev/null 2>&1 && return
+    local app_path=""
+    for p in "$HOME/bin/CountdownTimer.app" \
+             "$(cd "$DIR/../menu-bar" 2>/dev/null && pwd)/CountdownTimer.app" \
+             "/usr/local/share/media-pause/CountdownTimer.app"; do
+        [ -d "$p" ] && app_path="$p" && break
+    done
+    [ -z "$app_path" ] && return
+    open -g "$app_path" 2>/dev/null &
+}
+
 # ── Core: launch timer ──────────────────────────────────
 launch_timer() {
     local mode="$1" duration="$2" user_browser="$3" mode_flag="$4" mode_label="$5"
@@ -161,6 +175,9 @@ launch_timer() {
         echo "Stop it first: run 'Timer Stop'"
         exit 1
     fi
+
+    # ── Ensure menu bar app is running ───────────────────
+    ensure_menubar
 
     # ── Launch ──────────────────────────────────────────
     "$bin" $mode_flag -b "$browsers" "$duration" >/dev/null 2>&1 &

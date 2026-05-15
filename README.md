@@ -45,6 +45,23 @@ ln -sf "$PWD/media-pause" ~/bin/media-pause
 - 开始和完成时弹出系统通知
 - 计时在后台运行，不影响工作
 
+### 菜单栏计时器
+
+启动任一定时命令后，菜单栏会自动显示倒计时：
+
+```
+⏸ 22:30     ← 剩余时间实时更新，一眼可见
+```
+
+点击菜单栏图标可展开详情：模式、标签、进度条、剩余/已用时间，以及停止按钮。
+
+构建方式：
+
+```bash
+bash menu-bar/build.sh           # 编译为 CountdownTimer.app
+open menu-bar/CountdownTimer.app # 手动启动（Raycast 命令会自动启动）
+```
+
 ## 用法
 
 ```
