@@ -40,9 +40,8 @@ fi
 if [ -z "$DURATION" ]; then
     # Immediate resume, no timer
     LABEL=$(echo "$BROWSERS" | tr ',' ', ')
-    NUM=$(echo "$BROWSERS" | tr ',' '\n' | wc -l | tr -d ' ')
     "$BIN" -r -b "$BROWSERS" >/dev/null 2>&1 &
-    echo "Resumed: $NUM browser(s) ($LABEL)"
+    echo "Resumed $LABEL"
     [ -n "$USER_BROWSER" ] && remember_browser "$USER_BROWSER"
 else
     # Resume with countdown to re-pause

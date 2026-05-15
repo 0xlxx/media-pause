@@ -158,7 +158,7 @@ launch_timer() {
         local old_fmt=$(printf "%02d:%02d" $((old_remain/60)) $((old_remain%60)))
 
         echo "Timer already running: $old_mode · $old_label · ${old_fmt}m remaining"
-        echo "Stop it first: run 'Media Pause Stop'"
+        echo "Stop it first: run 'Timer Stop'"
         exit 1
     fi
 
@@ -195,7 +195,7 @@ launch_timer() {
     ) &
     disown
 
-    echo "$mode_label: $duration → $num browser(s) ($label)  |  Status: run 'Media Pause Status'"
+    echo "$mode_label $label in $duration  |  Status: run 'Timer Status'"
 }
 
 # ── Status: progress display ───────────────────────────
@@ -239,6 +239,6 @@ show_status() {
 
     echo "$mode_label · $label"
     echo "$bar ${pct}%"
+    echo "Stop: run 'Timer Stop'"
     echo "⏳ $fmt_remain remaining   ⏱ $fmt_elapsed elapsed"
-    echo "Stop: run 'Media Pause Stop'"
 }
