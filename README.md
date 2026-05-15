@@ -4,12 +4,30 @@ macOS 倒计时结束后暂停浏览器标签页中所有视频/音频播放。
 
 ## 安装
 
+### Homebrew (推荐)
+
+```bash
+brew install bjorn/homebrew-tap/media-pause
+```
+
+### 手动安装
+
 ```bash
 swiftc -O -o media-pause main.swift
 ln -sf "$PWD/media-pause" ~/bin/media-pause
 ```
 
 要求 macOS 自带 Swift 工具链，无需额外依赖。
+
+### Raycast 集成
+
+将 `raycast/` 目录添加到 Raycast 脚本目录：
+
+1. Raycast 设置 → Extensions → 点击 `+` → Script Directory
+2. 选择本仓库的 `raycast/` 目录
+3. 在 Raycast 中输入 `Media Pause` 即可使用
+   - 输入时长（如 `30m`、`1h`）
+   - 选择目标浏览器（支持 All Browsers）
 
 ## 用法
 
@@ -26,7 +44,7 @@ media-pause [选项] [时长]
 | `-p, --playpause` | 倒计时结束后发送系统媒体键（对所有 App 生效） |
 | `-m, --mute` | 倒计时结束后静音所有发声标签页 |
 | `-q, --quit` | 倒计时结束后退出浏览器 |
-| `-b, --browser` | 指定浏览器（chrome/brave/edge/arc/chromium/opera/vivaldi，默认 chrome） |
+| `-b, --browser` | 指定浏览器，支持逗号分隔 (`chrome,brave`)、重复 (`-b chrome -b brave`) 和 `all`，默认 chrome |
 
 ### 时长格式
 
@@ -39,6 +57,8 @@ media-pause 45m              # 45 分钟后暂停媒体
 media-pause -r               # 立即恢复上次暂停的媒体
 media-pause -r 10s           # 恢复播放 10 秒后再暂停
 media-pause -b brave 30m     # 30 分钟后暂停 Brave 的媒体
+media-pause -b chrome,brave 30m  # 同时暂停 Chrome 和 Brave
+media-pause -b all 30m       # 暂停所有已安装浏览器的媒体
 media-pause -b edge -q 1h    # 1 小时后退出 Edge
 media-pause -m 1h            # 1 小时后静音所有发声标签页
 media-pause -p 30m           # 30 分钟后发送媒体键（Spotify、IINA 等也可用）
