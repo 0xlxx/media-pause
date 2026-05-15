@@ -43,6 +43,7 @@ if [ -z "$DURATION" ]; then
     "$BIN" -r -b "$BROWSERS" >/dev/null 2>&1 &
     echo "Resumed $LABEL"
     [ -n "$USER_BROWSER" ] && remember_browser "$USER_BROWSER"
+    exit 0
 else
     # Resume with countdown to re-pause
     [ -n "$USER_BROWSER" ] && remember_browser "$USER_BROWSER"

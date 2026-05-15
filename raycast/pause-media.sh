@@ -43,6 +43,7 @@ if [ -z "$DURATION" ]; then
     "$BIN" -b "$BROWSERS" "1s" >/dev/null 2>&1 &
     echo "Paused $LABEL"
     [ -n "$USER_BROWSER" ] && remember_browser "$USER_BROWSER"
+    exit 0
 else
     # Countdown then pause
     [ -n "$USER_BROWSER" ] && remember_browser "$USER_BROWSER"
