@@ -25,22 +25,39 @@ final class TimerState: ObservableObject {
     }
 
     private func tick() {
+        // Read PID file — contains "<pid> <instance_id>"
+        guard let pidRaw = try? String(contentsOfFile: pidFile, encoding: .utf8) else {
+            setNotRunning()
+            return
+        }
+        let pidFields = pidRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: " ", omittingEmptySubsequences: true)
+        guard pidFields.count >= 2,
+              let pid = Int32(pidFields[0]),
+              kill(pid, 0) == 0 else {
+            setNotRunning()
+            return
+        }
+        let pidInstance = String(pidFields[1])
+
+        // Read status file — contains "<start_ts> <total_sec> <mode> <label> <instance_id>"
         guard let raw = try? String(contentsOfFile: statusFile, encoding: .utf8) else {
             setNotRunning()
             return
         }
         let allParts = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: " ", omittingEmptySubsequences: true)
-
         guard allParts.count >= 5 else { setNotRunning(); return }
+
+        // Validate instance IDs match to prevent stale data
+        guard String(allParts.last!) == pidInstance else { setNotRunning(); return }
+
         let startTs = TimeInterval(allParts[0]) ?? 0
         let totalSec = TimeInterval(allParts[1]) ?? 0
-        let mode = String(allParts[2])
-        let pidStr = String(allParts.last!)
-        let lbl = allParts[3..<(allParts.count - 1)].joined(separator: " ")
-
         guard startTs > 0, totalSec > 0 else { setNotRunning(); return }
-        guard isPidAlive(pidStr) else { setNotRunning(); return }
+
+        let mode = String(allParts[2])
+        let lbl = allParts[3..<(allParts.count - 1)].joined(separator: " ")
 
         let now = Date().timeIntervalSince1970
         let elapsedSec = now - startTs
@@ -63,11 +80,6 @@ final class TimerState: ObservableObject {
         remaining = ""
         elapsed = ""
         progress = 0
-    }
-
-    private func isPidAlive(_ pidStr: String) -> Bool {
-        guard let pid = Int32(pidStr), pid > 0 else { return false }
-        return kill(pid, 0) == 0
     }
 
     private func formatTime(_ sec: TimeInterval) -> String {
