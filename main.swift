@@ -696,33 +696,7 @@ func runTimer(totalSeconds: Int, mode: String) {
     // --- Completion ---
     print(clearScreen() + cursorHome(), terminator: "")
 
-    if isTTY {
-        let icons = ["🎉", "✨", "🚀", "💫"]
-        for _ in 0..<10 {
-            let icon = icons[Int.random(in: 0..<icons.count)]
-            let actionText: String
-            switch mode {
-            case "mute":      actionText = "\(gradientColor(0.2))🔇 Muting audible tabs...\(fgReset())"
-            case "quit":      actionText = "\(gradientColor(0.0))🚫 Shutting down \(browser.displayName)...\(fgReset())"
-            case "playpause": actionText = "\(gradientColor(0.2))⏯  Sending play/pause media key...\(fgReset())"
-            default:          actionText = "\(gradientColor(0.2))⏸  Pausing media on all tabs...\(fgReset())"
-            }
-            let box = drawBox(width: boxW, lines: [
-                "\(icon)  Time's Up!  \(icon)",
-                "",
-                actionText,
-            ])
-            print("\(cursorHome())\(box)")
-            fflush(stdout)
-            usleep(100_000)
-        }
-    } else {
-        print("media-pause: Time's up! Executing action...")
-    }
-
     // Execute action
-    print(clearScreen() + cursorHome(), terminator: "")
-
     switch mode {
     case "quit":
         var box = drawBox(width: boxW, lines: [
