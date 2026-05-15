@@ -7,7 +7,6 @@ import AppKit
 
 let VERSION = "3.0.0"
 
-let TICK_US: UInt32 = 33_000  // ~30fps smooth animation
 let PARTIAL_BLOCKS = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"]
 let SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
@@ -86,8 +85,8 @@ struct Browser {
     }
 }
 
-// Current browser (set during argument parsing)
-var browser = Browser.byKey("chrome")!
+// Current browsers (set during argument parsing, defaults to Chrome)
+var browsers: [Browser] = []
 
 // MARK: - Version & Help
 
@@ -110,7 +109,10 @@ func showHelp() {
           -q, --quit    Quit the browser entirely after countdown
 
         Options:
-          -b, --browser <name>  Target browser for tab actions (default: chrome)
+          -b, --browser <name>  Target browser(s) (default: chrome)
+                                Comma-separated: -b chrome,brave
+                                Repeatable:      -b chrome -b brave
+                                All browsers:    -b all
           -h, --help            Show this help
           -V, --version         Show version
 
@@ -124,13 +126,15 @@ func showHelp() {
           1h30m         Combined
 
         Examples:
-          \(name) 45m              Pause browser media after 45 minutes
-          \(name) -p 30m           Send play/pause key after 30 minutes (any app)
-          \(name) -r               Resume previously paused browser media
-          \(name) -r 10s           Resume, play for 10 seconds, then pause again
-          \(name) -b brave 30m     Pause Brave browser media after 30 minutes
-          \(name) -b edge -q 1h    Quit Edge after 1 hour
-          \(name) -m 1h            Mute audible tabs after 1 hour
+          \(name) 45m                  Pause browser media after 45 minutes
+          \(name) -p 30m               Send play/pause key after 30 minutes (any app)
+          \(name) -r                   Resume previously paused browser media
+          \(name) -r 10s               Resume, play for 10 seconds, then pause again
+          \(name) -b brave 30m         Pause Brave browser media after 30 minutes
+          \(name) -b chrome,brave 30m  Pause Chrome and Brave after 30 minutes
+          \(name) -b all 30m           Pause all installed browsers after 30 minutes
+          \(name) -b edge -q 1h        Quit Edge after 1 hour
+          \(name) -m 1h                Mute audible tabs after 1 hour
 
         Prerequisite (pause/resume/mute modes):
           In the browser: View > Developer > Allow JavaScript from Apple Events
@@ -213,8 +217,8 @@ func displayWidth(_ s: String) -> Int {
     var w = 0
     for scalar in s.unicodeScalars {
         switch scalar.value {
-        case 0x1F000...0x1FFFF, 0x2600...0x27BF, 0x2300...0x23FF:
-            w += 2
+        case 0x1F000...0x1FFFF:
+            w += 2  // Emoticons/Emoji — always wide
         default:
             w += 1
         }
@@ -245,9 +249,17 @@ func drawBox(width: Int, lines: [String]) -> String {
     for (i, line) in lines.enumerated() {
         let plain = line.replacingOccurrences(of: "\u{001B}\\[[0-9;]*m", with: "", options: .regularExpression)
         let lineW = displayWidth(plain)
-        let pad = max(0, inner - lineW)
+        let displayLine: String
+        let pad: Int
+        if lineW > inner {
+            displayLine = String(plain.prefix(inner - 1)) + "…"
+            pad = 0
+        } else {
+            displayLine = line
+            pad = inner - lineW
+        }
         let pl = pad / 2; let pr = pad - pl
-        let padded = String(repeating: " ", count: pl) + line + String(repeating: " ", count: pr)
+        let padded = String(repeating: " ", count: pl) + displayLine + String(repeating: " ", count: pr)
         if i == 1 { out += "├" + String(repeating: "─", count: inner) + "┤\n" }
         out += "│" + padded + "│\n"
     }
@@ -259,14 +271,14 @@ func drawBox(width: Int, lines: [String]) -> String {
 
 func preventAppNap() -> NSObjectProtocol? {
     ProcessInfo.processInfo.beginActivity(
-        options: [.userInitiated, .idleSystemSleepDisabled],
+        options: [.background, .idleSystemSleepDisabled],
         reason: "media-pause countdown timer"
     )
 }
 
 // MARK: - Browser JS Capability Check
 
-func checkBrowserJSCapability() -> String? {
+func checkBrowserJSCapability(for browser: Browser) -> String? {
     let script = """
     tell application "\(browser.appleScriptName)"
         if (count of windows) = 0 then return "OK"
@@ -311,9 +323,16 @@ struct ActionResult {
     let jsDisabled: Bool
 }
 
+// MARK: - Multi-Browser Result
+
+struct BrowserResult {
+    let browser: Browser
+    let result: ActionResult
+}
+
 // MARK: - Browser Actions (via AppleScript + JS injection)
 
-func makeAppleScript(js: String) -> String {
+func makeAppleScript(js: String, for browser: Browser) -> String {
     let escapedJS = js
         .replacingOccurrences(of: "\\", with: "\\\\")
         .replacingOccurrences(of: "\"", with: "\\\"")
@@ -389,17 +408,17 @@ func executeScript(_ script: String) -> ActionResult {
                         error: err, jsDisabled: isJSDisabled)
 }
 
-func pauseMedia() -> ActionResult {
-    let js = "document.querySelectorAll('video,audio').forEach(function(e){try{e.pause()}catch(_){}});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('video,audio').forEach(function(e){try{e.pause()}catch(_){}})}catch(_){}})"
-    return executeScript(makeAppleScript(js: js))
+func pauseMedia(for browser: Browser) -> ActionResult {
+    let js = "document.querySelectorAll('[data-media-pause]').forEach(function(e){e.removeAttribute('data-media-pause')});document.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('[data-media-pause]').forEach(function(e){e.removeAttribute('data-media-pause')});f.contentDocument.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}})}catch(_){}})"
+    return executeScript(makeAppleScript(js: js, for: browser))
 }
 
-func resumeMedia() -> ActionResult {
-    let js = "document.querySelectorAll('video,audio').forEach(function(e){try{e.play()}catch(_){}});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('video,audio').forEach(function(e){try{e.play()}catch(_){}})}catch(_){}})"
-    return executeScript(makeAppleScript(js: js))
+func resumeMedia(for browser: Browser) -> ActionResult {
+    let js = "document.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')})}catch(_){}})"
+    return executeScript(makeAppleScript(js: js, for: browser))
 }
 
-func muteAudibleTabs() -> ActionResult {
+func muteAudibleTabs(for browser: Browser) -> ActionResult {
     let script = """
     tell application "\(browser.appleScriptName)"
         set okCount to 0
@@ -451,7 +470,7 @@ func muteAudibleTabs() -> ActionResult {
     return ActionResult(affected: affected, total: total, tabs: titles, error: nil, jsDisabled: false)
 }
 
-func quitBrowser() -> Bool {
+func quitBrowser(for browser: Browser) -> Bool {
     NSWorkspace.shared.runningApplications
         .first { $0.bundleIdentifier == browser.bundleID }?
         .terminate() ?? false
@@ -494,12 +513,17 @@ func main() {
         case "-b", "--browser":
             i = args.index(after: i)
             if i < args.endIndex {
-                let key = args[i].lowercased()
-                guard let b = Browser.byKey(key) else {
-                    fputs("Error: Unknown browser '\(args[i])'\n  Valid: \(Browser.all.map(\.key).joined(separator: ", "))\n", stderr)
-                    exit(1)
+                let raw = args[i]
+                for key in raw.lowercased().split(separator: ",").map({ String($0).trimmingCharacters(in: .whitespaces) }) {
+                    if key == "all" {
+                        browsers.append(contentsOf: Browser.all)
+                    } else if let b = Browser.byKey(key) {
+                        browsers.append(b)
+                    } else {
+                        fputs("Error: Unknown browser '\(key)'\n  Valid: all, \(Browser.all.map(\.key).joined(separator: ", "))\n", stderr)
+                        exit(1)
+                    }
                 }
-                browser = b
             } else {
                 fputs("Error: -b requires a browser name\n", stderr)
                 exit(1)
@@ -510,36 +534,50 @@ func main() {
         i = args.index(after: i)
     }
 
+    // Deduplicate and default to Chrome
+    var seen: Set<String> = []
+    browsers = browsers.filter { seen.insert($0.key).inserted }
+    if browsers.isEmpty {
+        browsers = [Browser.byKey("chrome")!]
+    }
+
     // --- Resume mode ---
     if mode == "resume" {
         if let dur = durStr {
             // Resume immediately, then count down to pause
             let totalSeconds = parseDuration(dur)
-            let resumeResult = resumeMedia()
-            // Show quick result unless it failed
-            if resumeResult.jsDisabled || resumeResult.error != nil {
+            var allResults: [BrowserResult] = []
+            for b in browsers {
+                allResults.append(BrowserResult(browser: b, result: resumeMedia(for: b)))
+            }
+            let hasError = allResults.contains { $0.result.jsDisabled || $0.result.error != nil }
+            if hasError {
                 print(hideCursor(), terminator: "")
                 print(clearScreen() + cursorHome(), terminator: "")
-                showResult(result: resumeResult, boxW: 62, icon: "▶", label: "Resume Media", verb: "Resumed")
+                showResults(allResults, boxW: 62, icon: "▶", label: "Resume Media", verb: "Resumed")
                 print(showCursor(), terminator: "")
                 fflush(stdout)
-                exit(resumeResult.jsDisabled || resumeResult.error != nil ? 1 : 0)
+                exit(1)
             }
             // Run the countdown, then pause
             runTimer(totalSeconds: totalSeconds, mode: "pause")
         } else {
             // Just resume, no timer
+            let label = browsers.count == 1 ? browsers[0].displayName : "\(browsers.count) browsers"
             print(hideCursor(), terminator: "")
             print(clearScreen() + cursorHome(), terminator: "")
             let box = drawBox(width: 62, lines: [
-                "\(fgBold())▶  Resuming media on all \(browser.displayName) tabs...\(fgReset())",
+                "\(fgBold())▶  Resuming media on \(label) tabs...\(fgReset())",
                 "",
-                "\(rgb(140, 200, 255))Calling .play() on video/audio elements\(fgReset())",
+                "\(rgb(140, 200, 255))Restoring previously-paused media...\(fgReset())",
             ])
             print(box)
             fflush(stdout)
-            let result = resumeMedia()
-            showResult(result: result, boxW: 62, icon: "▶", label: "Resume Media", verb: "Resumed")
+            var allResults: [BrowserResult] = []
+            for b in browsers {
+                allResults.append(BrowserResult(browser: b, result: resumeMedia(for: b)))
+            }
+            showResults(allResults, boxW: 62, icon: "▶", label: "Resume Media", verb: "Resumed")
             print("")
             print(showCursor(), terminator: "")
             fflush(stdout)
@@ -552,14 +590,20 @@ func main() {
 
     // JS capability pre-flight (only for modes that inject JavaScript)
     if mode == "pause" || mode == "resume" {
-        if let capErr = checkBrowserJSCapability() {
+        var capErrors: [(Browser, String)] = []
+        for b in browsers {
+            if let err = checkBrowserJSCapability(for: b) {
+                capErrors.append((b, err))
+            }
+        }
+        if !capErrors.isEmpty {
             print(hideCursor(), terminator: "")
             print(clearScreen() + cursorHome(), terminator: "")
-            let msg = drawBox(width: 62, lines: [
-                "\(fgBold())⚠  media-pause: Setup Required\(fgReset())",
-                "",
-                "\(rgb(255, 180, 50))\(capErr)\(fgReset())",
-            ])
+            let errorLines: [String] = capErrors.map { (b, err) in
+                "\(rgb(255, 180, 50))\(b.displayName): \(err)\(fgReset())"
+            }
+            let lines = ["\(fgBold())⚠  media-pause: Setup Required\(fgReset())", ""] + errorLines
+            let msg = drawBox(width: 62, lines: lines)
             print(msg)
             print("")
             print(showCursor(), terminator: "")
@@ -592,8 +636,12 @@ func runTimer(totalSeconds: Int, mode: String) {
         ws.ws_col = 80
     }
     let termW = Int(ws.ws_col)
-    let boxW = max(20, min(termW, 64))
-    let barW = max(1, boxW - 12)
+    let barW = max(10, termW - 16)
+
+    // Dynamic tick: match framerate to progress bar's visible granularity
+    let steps = Double(barW * 8)
+    let tickInterval = max(0.05, min(0.5, Double(totalSeconds) / (steps * 2.0)))
+    let tickUS = UInt32(tickInterval * 1_000_000)
 
     print(hideCursor(), terminator: "")
     print(clearScreen() + cursorHome(), terminator: "")
@@ -601,16 +649,22 @@ func runTimer(totalSeconds: Int, mode: String) {
     let start = Date()
     var si = 0
 
+    let browserLabel: String
+    if browsers.count == 1 {
+        browserLabel = browsers[0].displayName
+    } else {
+        browserLabel = "\(browsers.count) browsers"
+    }
     let actionLabel: String
     switch mode {
     case "mute":      actionLabel = "Muting audible tabs when done"
-    case "quit":      actionLabel = "Quitting \(browser.displayName) when done"
+    case "quit":      actionLabel = "Quitting \(browserLabel) when done"
     case "playpause": actionLabel = "Sending play/pause media key when done"
     default:          actionLabel = "Pausing media on all tabs when done"
     }
 
     if !isTTY {
-        print("media-pause [\(browser.displayName)]: \(actionLabel.lowercased()) in \(formatHMS(totalSeconds))")
+        print("media-pause [\(browserLabel)]: \(actionLabel.lowercased()) in \(formatHMS(totalSeconds))")
     }
 
     // --- Countdown Loop (with pause/resume via Space) ---
@@ -638,7 +692,7 @@ func runTimer(totalSeconds: Int, mode: String) {
             } else {
                 color = gradientColor(1.0 - pct)
                 let spin = SPINNER[si % SPINNER.count]; si += 1
-                statusLine = "\(fgBold())\(spin)  media-pause · \(browser.displayName)\(fgReset())"
+                statusLine = "\(fgBold())\(spin)  media-pause · \(browserLabel)\(fgReset())"
             }
 
             let subtitle = isTimerPaused
@@ -646,12 +700,14 @@ func runTimer(totalSeconds: Int, mode: String) {
                 : "\(rgb(140, 140, 140))\(actionLabel) · [Space] Pause timer & playback\(fgReset())"
 
             let bar = buildBar(progress: pct, width: barW)
-            let barLine    = "\(color)\(bar)  \(fgBold())\(Int(pct * 100))%\(fgReset())"
+            let barLine    = "\(color)\(bar)  \(fgBold())\(String(format: "%3d%%", Int(pct * 100)))\(fgReset())"
             let remainLine = "\(color)⏳ Remaining: \(fgBold())\(formatHMS(remSec))\(fgReset())"
             let elapsLine  = "\(rgb(140, 140, 140))⏱  Elapsed:  \(formatHMS(elaSec))\(fgReset())"
 
-            let box = drawBox(width: boxW, lines: [statusLine, subtitle, "", barLine, remainLine, elapsLine])
-            print("\(cursorHome())\(box)")
+            let clear = String(repeating: " ", count: termW)
+            let lines = ["  \(statusLine)", "  \(subtitle)", "", "  \(barLine)", "  \(remainLine)", "  \(elapsLine)"]
+            let frame = lines.map { String(($0 + clear).prefix(termW)) }.joined(separator: "\n")
+            print("\(cursorHome())\(frame)")
         } else {
             if elaSec % 30 == 0 && elaSec > 0 && !isTimerPaused {
                 print("[media-pause] \(formatHMS(remSec)) remaining (\(Int(pct * 100))%)")
@@ -666,10 +722,10 @@ func runTimer(totalSeconds: Int, mode: String) {
                 lastHotkeyTime = t
                 isTimerPaused.toggle()
                 if isTimerPaused {
-                    _ = pauseMedia()
+                    for b in browsers { _ = pauseMedia(for: b) }
                     pausedAt = Date()
                 } else {
-                    _ = resumeMedia()
+                    for b in browsers { _ = resumeMedia(for: b) }
                     if let p = pausedAt {
                         totalPaused += -p.timeIntervalSinceNow
                         pausedAt = nil
@@ -681,9 +737,9 @@ func runTimer(totalSeconds: Int, mode: String) {
         if remaining <= 0 { break }
 
         if !isTimerPaused {
-            usleep(TICK_US)
+            usleep(tickUS)
         } else {
-            usleep(TICK_US)  // keep polling for Space even when paused
+            usleep(tickUS)  // keep polling for Space even when paused
         }
     }
 
@@ -696,29 +752,38 @@ func runTimer(totalSeconds: Int, mode: String) {
     // --- Completion ---
     print(clearScreen() + cursorHome(), terminator: "")
 
+    let boxW = max(20, min(termW, 64))
+
     // Execute action
     switch mode {
     case "quit":
-        var box = drawBox(width: boxW, lines: [
-            "🚫  Quit \(browser.displayName)",
+        let quitLabel = browsers.count == 1 ? browsers[0].displayName : "\(browsers.count) browsers"
+        let box = drawBox(width: boxW, lines: [
+            "🚫  Quit \(quitLabel)",
             "",
-            "\(gradientColor(0.0))Shutting down \(browser.displayName)...\(fgReset())",
+            "\(gradientColor(0.0))Shutting down \(quitLabel)...\(fgReset())",
         ])
         print(box)
         fflush(stdout)
 
-        let ok = quitBrowser()
-        box = drawBox(width: boxW, lines: [
-            "🚫  Quit \(browser.displayName)",
-            "",
-            ok
-                ? "\(rgb(100, 255, 100))✓  \(browser.displayName) closed successfully\(fgReset())"
-                : "\(rgb(255, 200, 100))⚠  \(browser.displayName) is not running\(fgReset())",
-        ])
-        print("\(cursorHome())\(box)")
+        var quitResults: [BrowserResult] = []
+        for b in browsers {
+            let ok = quitBrowser(for: b)
+            let result = ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [], error: ok ? nil : "\(b.displayName) is not running", jsDisabled: false)
+            quitResults.append(BrowserResult(browser: b, result: result))
+        }
+        showResults(quitResults, boxW: boxW, icon: "🚫", label: "Quit Browsers", verb: "Quit")
+        print("")
+        print(showCursor(), terminator: "")
+        fflush(stdout)
+        return
 
     case "mute":
-        showResult(result: muteAudibleTabs(), boxW: boxW, icon: "🔇", label: "Mute Tabs", verb: "Muted")
+        var muteResults: [BrowserResult] = []
+        for b in browsers {
+            muteResults.append(BrowserResult(browser: b, result: muteAudibleTabs(for: b)))
+        }
+        showResults(muteResults, boxW: boxW, icon: "🔇", label: "Mute Tabs", verb: "Muted")
 
     case "playpause":
         var box = drawBox(width: boxW, lines: [
@@ -739,7 +804,11 @@ func runTimer(totalSeconds: Int, mode: String) {
         print("\(cursorHome())\(box)")
 
     default:
-        showResult(result: pauseMedia(), boxW: boxW, icon: "⏸", label: "Pause Media", verb: "Paused")
+        var pauseResults: [BrowserResult] = []
+        for b in browsers {
+            pauseResults.append(BrowserResult(browser: b, result: pauseMedia(for: b)))
+        }
+        showResults(pauseResults, boxW: boxW, icon: "⏸", label: "Pause Media", verb: "Paused")
     }
 
     print("")
@@ -748,39 +817,43 @@ func runTimer(totalSeconds: Int, mode: String) {
 
 // MARK: - Result Display
 
-func showResult(result: ActionResult, boxW: Int, icon: String, label: String, verb: String = "Paused") {
-    let statusColor: String
-    let statusIcon: String
-    let message: String
+func showResults(_ results: [BrowserResult], boxW: Int, icon: String, label: String, verb: String = "Paused") {
+    var resultLines: [String] = []
 
-    if result.jsDisabled {
-        statusColor = rgb(255, 180, 50)
-        statusIcon = "⚠"
-        message = """
-            \(browser.displayName) JS injection is disabled!
+    for br in results {
+        let r = br.result
+        let b = br.browser
+        let line: String
 
-            Enable in \(browser.displayName): View > Developer >
-            "Allow JavaScript from Apple Events"
-            """
-    } else if let err = result.error, !err.isEmpty {
-        statusColor = rgb(255, 180, 50)
-        statusIcon = "⚠"
-        message = "Error: \(err)"
-    } else if result.affected > 0 {
-        statusColor = rgb(100, 255, 100)
-        statusIcon = "✓"
-        message = "\(verb) media on \(result.affected) of \(result.total) tab\(result.total == 1 ? "" : "s")"
-    } else {
-        statusColor = rgb(140, 200, 255)
-        statusIcon = "ℹ"
-        message = "No media elements found on \(result.total) tab\(result.total == 1 ? "" : "s")"
+        if r.jsDisabled {
+            line = "\(rgb(255, 180, 50))⚠  \(b.displayName): JS injection disabled — enable in View > Developer > Allow JavaScript from Apple Events\(fgReset())"
+        } else if let err = r.error, !err.isEmpty {
+            line = "\(rgb(255, 180, 50))⚠  \(b.displayName): \(err)\(fgReset())"
+        } else if r.affected > 0 {
+            line = "\(rgb(100, 255, 100))✓  \(b.displayName): \(verb) media on \(r.affected) of \(r.total) tab\(r.total == 1 ? "" : "s")\(fgReset())"
+        } else {
+            line = "\(rgb(140, 200, 255))ℹ  \(b.displayName): No media found on \(r.total) tab\(r.total == 1 ? "" : "s")\(fgReset())"
+        }
+        resultLines.append(line)
     }
 
-    let box = drawBox(width: max(boxW, 50), lines: [
-        "\(icon)  \(label)",
-        "",
-        "\(statusColor)\(statusIcon)  \(message)\(fgReset())",
-    ])
+    let totalAffected = results.reduce(0) { $0 + $1.result.affected }
+    let totalTabs = results.reduce(0) { $0 + $1.result.total }
+    let summary: String
+    if results.contains(where: { $0.result.jsDisabled || $0.result.error != nil }) {
+        summary = ""
+    } else {
+        summary = "\(rgb(140, 140, 140))Total: \(verb.lowercased()) \(totalAffected) of \(totalTabs) tab\(totalTabs == 1 ? "" : "s") across \(results.count) browser\(results.count == 1 ? "" : "s")\(fgReset())"
+    }
+
+    var lines: [String] = ["\(icon)  \(label)", ""]
+    lines.append(contentsOf: resultLines)
+    if !summary.isEmpty {
+        lines.append("")
+        lines.append(summary)
+    }
+
+    let box = drawBox(width: max(boxW, 50), lines: lines)
     print(box)
     fflush(stdout)
 }
