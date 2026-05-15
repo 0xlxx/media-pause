@@ -51,20 +51,24 @@ is_installed() {
     [ -d "/Applications/${app_name%.app}" ] || [ -d "$HOME/Applications/${app_name%.app}" ]
 }
 
-# Map user-friendly names to Browser keys and app names
-declare -A APP_NAMES
-APP_NAMES[chrome]="Google Chrome.app"
-APP_NAMES[brave]="Brave Browser.app"
-APP_NAMES[edge]="Microsoft Edge.app"
-APP_NAMES[arc]="Arc.app"
-APP_NAMES[chromium]="Chromium.app"
-APP_NAMES[opera]="Opera.app"
-APP_NAMES[vivaldi]="Vivaldi.app"
+# Map browser key to .app name (bash 3.2 compatible)
+app_name() {
+    case "$1" in
+        chrome)   echo "Google Chrome.app" ;;
+        brave)    echo "Brave Browser.app" ;;
+        edge)     echo "Microsoft Edge.app" ;;
+        arc)      echo "Arc.app" ;;
+        chromium) echo "Chromium.app" ;;
+        opera)    echo "Opera.app" ;;
+        vivaldi)  echo "Vivaldi.app" ;;
+        *)        echo "" ;;
+    esac
+}
 
 detect_installed() {
     local found=""
     for key in chrome brave edge arc chromium opera vivaldi; do
-        if is_installed "${APP_NAMES[$key]}"; then
+        if is_installed "$(app_name "$key")"; then
             found="$found,$key"
         fi
     done
@@ -105,11 +109,10 @@ else
 fi
 
 # ──────────────────────────────────────────────
-# Count how many browsers
+# Format for display
 # ──────────────────────────────────────────────
-IFS=',' read -ra BROWSER_ARRAY <<< "$BROWSERS"
-NUM_BROWSERS=${#BROWSER_ARRAY[@]}
-BROWSER_LABEL=$(IFS=', '; echo "${BROWSER_ARRAY[*]}")
+NUM_BROWSERS=$(echo "$BROWSERS" | tr ',' '\n' | wc -l | tr -d ' ')
+BROWSER_LABEL=$(echo "$BROWSERS" | tr ',' ', ')
 
 # ──────────────────────────────────────────────
 # Run in background, notify on completion
