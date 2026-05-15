@@ -26,8 +26,11 @@ ln -sf "$PWD/media-pause" ~/bin/media-pause
 1. Raycast 设置 → Extensions → 点击 `+` → Script Directory
 2. 选择本仓库的 `raycast/` 目录
 3. 在 Raycast 中输入 `Media Pause` 即可使用
-   - 输入时长（如 `30m`、`1h`）
-   - 选择目标浏览器（支持 All Browsers）
+   - **时长**: 如 `30m`、`1h`、`3600`（默认 1h）
+   - **浏览器**: 输入浏览器名（如 `chrome`、`brave,edge`、`all`）
+   - 自动检测已安装的浏览器，未安装的会自动过滤
+   - 启动和完成时均会弹出系统通知
+   - 计时在后台运行，不影响继续工作
 
 ## 用法
 
