@@ -6,36 +6,32 @@
 # @raycast.mode compact
 # @raycast.icon ⏸
 # @raycast.packageName Media Tools
-# @raycast.description Pause browser media after a countdown
+# @raycast.description Countdown timer to pause/resume/mute browser media
 
 # Optional parameters:
 # @raycast.author bjorn
-# @raycast.keywords timer pause media browser countdown
+# @raycast.keywords timer pause resume mute quit browser countdown
 
 # Arguments:
-# @raycast.argument1 { "type": "text", "placeholder": "Duration (30m, 1h, 3600)", "optional": true }
-# @raycast.argument2 { "type": "text", "placeholder": "Browser: chrome, brave, all", "optional": true }
+# @raycast.argument1 { "type": "text", "placeholder": "Duration (30m, 1h, 3600) — default 1h", "optional": true }
+# @raycast.argument2 { "type": "text", "placeholder": "Browser: chrome, brave, all — default chrome", "optional": true }
+# @raycast.argument3 { "type": "dropdown", "placeholder": "Mode — default Pause", "optional": true, "data": [{"title": "Pause (default)", "value": "pause"}, {"title": "Resume", "value": "resume"}, {"title": "Mute", "value": "mute"}, {"title": "Quit Browser", "value": "quit"}, {"title": "Play/Pause Key", "value": "playpause"}] }
 
 DURATION="${1:-1h}"
 USER_INPUT="${2:-chrome}"
+MODE="${3:-pause}"
+
+PIDFILE="/tmp/media-pause.pid"
 
 # ──────────────────────────────────────────────
-# Locate the media-pause binary
+# Locate binary
 # ──────────────────────────────────────────────
 find_bin() {
-    if command -v media-pause &>/dev/null; then
-        echo "media-pause"
-    elif [ -x "/opt/homebrew/bin/media-pause" ]; then
-        echo "/opt/homebrew/bin/media-pause"
-    elif [ -x "/usr/local/bin/media-pause" ]; then
-        echo "/usr/local/bin/media-pause"
-    elif [ -x "$HOME/bin/media-pause" ]; then
-        echo "$HOME/bin/media-pause"
-    else
-        echo ""
-    fi
+    command -v media-pause 2>/dev/null && return
+    for p in /opt/homebrew/bin /usr/local/bin "$HOME/bin"; do
+        [ -x "$p/media-pause" ] && echo "$p/media-pause" && return
+    done
 }
-
 BIN="$(find_bin)"
 if [ -z "$BIN" ]; then
     echo "media-pause not found. Install: brew install bjorn/homebrew-tap/media-pause"
@@ -43,15 +39,13 @@ if [ -z "$BIN" ]; then
 fi
 
 # ──────────────────────────────────────────────
-# Detect which browsers are actually installed
+# Detect installed browsers
 # ──────────────────────────────────────────────
 is_installed() {
     local app_name="$1"
-    [ -d "/Applications/$app_name" ] || [ -d "$HOME/Applications/$app_name" ] || \
-    [ -d "/Applications/${app_name%.app}" ] || [ -d "$HOME/Applications/${app_name%.app}" ]
+    [ -d "/Applications/$app_name" ] || [ -d "$HOME/Applications/$app_name" ]
 }
 
-# Map browser key to .app name (bash 3.2 compatible)
 app_name() {
     case "$1" in
         chrome)   echo "Google Chrome.app" ;;
@@ -78,58 +72,81 @@ detect_installed() {
 INSTALLED=$(detect_installed)
 
 # ──────────────────────────────────────────────
-# Resolve browser selection
+# Resolve browser
 # ──────────────────────────────────────────────
-if [ "$USER_INPUT" = "all" ]; then
-    BROWSERS="$INSTALLED"
-    if [ -z "$BROWSERS" ]; then
-        echo "No supported browsers detected. Install Chrome, Brave, Edge, etc."
-        exit 1
+resolve_browsers() {
+    local input="$1"
+    local result=""
+
+    # "all" → all installed
+    if [ "$input" = "all" ]; then
+        echo "$INSTALLED"
+        return
     fi
-else
-    # Parse comma-separated input, filter to only installed
-    IFS=',' read -ra KEYS <<< "$USER_INPUT"
-    BROWSERS=""
-    for key in "${KEYS[@]}"; do
-        key=$(echo "$key" | xargs | tr '[:upper:]' '[:lower:]')
-        if [ "$key" = "all" ]; then
-            BROWSERS="$INSTALLED"
-            break
-        fi
-        if echo "$INSTALLED" | grep -qw "$key"; then
-            BROWSERS="$BROWSERS,$key"
+
+    # Comma-separated, filter to installed
+    local old_ifs="$IFS"
+    IFS=','
+    for key in $input; do
+        key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
+        [ "$key" = "all" ] && { echo "$INSTALLED"; return; }
+        if echo ",$INSTALLED," | grep -q ",$key,"; then
+            result="$result,$key"
         fi
     done
-    BROWSERS="${BROWSERS#,}"
-    if [ -z "$BROWSERS" ]; then
-        echo "None of the requested browsers are installed."
-        echo "Installed: ${INSTALLED:-none}"
-        exit 1
-    fi
+    IFS="$old_ifs"
+    echo "${result#,}"
+}
+
+BROWSERS=$(resolve_browsers "$USER_INPUT")
+if [ -z "$BROWSERS" ]; then
+    echo "No supported browser found. Installed: ${INSTALLED:-none}"
+    exit 1
 fi
 
+NUM=$(echo "$BROWSERS" | tr ',' '\n' | wc -l | tr -d ' ')
+LABEL=$(echo "$BROWSERS" | tr ',' ', ')
+
 # ──────────────────────────────────────────────
-# Format for display
+# Build command
 # ──────────────────────────────────────────────
-NUM_BROWSERS=$(echo "$BROWSERS" | tr ',' '\n' | wc -l | tr -d ' ')
-BROWSER_LABEL=$(echo "$BROWSERS" | tr ',' ', ')
+MODE_FLAG=""
+MODE_LABEL="Pause"
+case "$MODE" in
+    resume)    MODE_FLAG="-r"; MODE_LABEL="Resume" ;;
+    mute)      MODE_FLAG="-m"; MODE_LABEL="Mute" ;;
+    quit)      MODE_FLAG="-q"; MODE_LABEL="Quit" ;;
+    playpause) MODE_FLAG="-p"; MODE_LABEL="Play/Pause" ;;
+    *)         MODE_FLAG="";   MODE_LABEL="Pause" ;;
+esac
 
 # ──────────────────────────────────────────────
 # Run in background, notify on completion
 # ──────────────────────────────────────────────
+
+# Launch media-pause in background, capture real PID
+"$BIN" $MODE_FLAG -b "$BROWSERS" "$DURATION" >/dev/null 2>&1 &
+PID=$!
+echo "$PID" > "$PIDFILE"
+
+osascript -e "
+    display notification \"$DURATION countdown started for $LABEL\"
+    with title \"media-pause — $MODE_LABEL\"
+    subtitle \"Timer running\"
+" 2>/dev/null
+
+# Background watcher: poll until PID exits, then notify
 (
-    # Post start notification
-    osascript -e "display notification \"$DURATION countdown started for $BROWSER_LABEL\" with title \"media-pause\" subtitle \"Timer running\"" 2>/dev/null
-
-    "$BIN" -b "$BROWSERS" "$DURATION" >/dev/null 2>&1
-    EXIT=$?
-
-    if [ $EXIT -eq 0 ]; then
-        osascript -e "display notification \"Done — media paused on $BROWSER_LABEL\" with title \"media-pause\" subtitle \"Countdown finished\"" 2>/dev/null
-    else
-        osascript -e "display notification \"Cancelled or failed\" with title \"media-pause\" subtitle \"Countdown stopped\"" 2>/dev/null
-    fi
+    while kill -0 "$PID" 2>/dev/null; do
+        sleep 1
+    done
+    rm -f "$PIDFILE"
+    osascript -e "
+        display notification \"Done — media action completed for $LABEL\"
+        with title \"media-pause — $MODE_LABEL\"
+        subtitle \"Countdown finished\"
+    " 2>/dev/null
 ) &
 disown
 
-echo "Started: $DURATION → $NUM_BROWSERS browser(s) ($BROWSER_LABEL)"
+echo "$MODE_LABEL: $DURATION → $NUM browser(s) ($LABEL)  |  Status: run 'Media Pause Status'"
