@@ -9,7 +9,7 @@
 # @raycast.description Show running timer progress with elapsed/remaining time
 
 # Optional parameters:
-# @raycast.author bjorn
+# @raycast.author 0xlxx
 # @raycast.keywords timer status progress running check remaining
 
 DIR="$(cd "$(dirname "$0")" && pwd)"

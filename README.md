@@ -7,7 +7,7 @@ macOS 倒计时结束后暂停浏览器标签页中所有视频/音频播放。
 ### Homebrew (推荐)
 
 ```bash
-brew install bjorn/homebrew-tap/media-pause
+brew install 0xlxx/homebrew-tap/media-pause
 ```
 
 ### 手动安装

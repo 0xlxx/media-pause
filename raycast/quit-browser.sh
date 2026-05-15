@@ -9,7 +9,7 @@
 # @raycast.description Countdown then quit the browser entirely
 
 # Optional parameters:
-# @raycast.author bjorn
+# @raycast.author 0xlxx
 # @raycast.keywords timer quit close browser shutdown countdown
 
 # Arguments:

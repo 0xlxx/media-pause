@@ -9,7 +9,7 @@
 # @raycast.description Resume previously-paused browser media, with optional countdown to re-pause
 
 # Optional parameters:
-# @raycast.author bjorn
+# @raycast.author 0xlxx
 # @raycast.keywords timer resume play video media unpause
 
 # Arguments:
@@ -31,11 +31,7 @@ if [ -z "$BROWSERS" ]; then
     exit 1
 fi
 
-BIN=$(find_bin)
-if [ -z "$BIN" ]; then
-    echo "media-pause not found. Install: brew install bjorn/homebrew-tap/media-pause"
-    exit 1
-fi
+BIN=$(require_bin)
 
 if [ -z "$DURATION" ]; then
     # Immediate resume — stop any running timer first

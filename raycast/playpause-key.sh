@@ -9,7 +9,7 @@
 # @raycast.description Countdown then send system play/pause key (works with any app: Spotify, Music, VLC...)
 
 # Optional parameters:
-# @raycast.author bjorn
+# @raycast.author 0xlxx
 # @raycast.keywords timer playpause media key spotify music countdown
 
 # Arguments:
@@ -19,9 +19,6 @@ DURATION="${1:-1h}"
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$DIR/_media-pause-lib.sh"
-
-PIDFILE="/tmp/media-pause.pid"
-STATUSFILE="/tmp/media-pause.status"
 
 CURRENT=$(read_current_timer)
 if [ -n "$CURRENT" ]; then
@@ -39,11 +36,7 @@ if [ -n "$CURRENT" ]; then
     exit 1
 fi
 
-BIN=$(find_bin)
-if [ -z "$BIN" ]; then
-    echo "media-pause not found. Install: brew install bjorn/homebrew-tap/media-pause"
-    exit 1
-fi
+BIN=$(require_bin)
 DUR_SEC=$(parse_duration_seconds "$DURATION")
 INSTANCE_ID="$(date +%s).$$"
 

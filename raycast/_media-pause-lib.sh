@@ -6,11 +6,22 @@ PIDFILE="/tmp/media-pause.pid"
 STATUSFILE="/tmp/media-pause.status"
 
 # ── Binary discovery ──────────────────────────────────
+INSTALL_HINT="media-pause not found. Install: brew install 0xlxx/homebrew-tap/media-pause"
+
 find_bin() {
     command -v media-pause 2>/dev/null && return
     for p in /opt/homebrew/bin /usr/local/bin "$HOME/bin"; do
         [ -x "$p/media-pause" ] && echo "$p/media-pause" && return
     done
+}
+
+require_bin() {
+    local bin=$(find_bin)
+    if [ -z "$bin" ]; then
+        echo "$INSTALL_HINT"
+        exit 1
+    fi
+    echo "$bin"
 }
 
 # ── App name mapping (bash 3.2, no associative arrays) ──
@@ -150,12 +161,7 @@ launch_timer() {
     local num=$(echo "$browsers" | tr ',' '\n' | wc -l | tr -d ' ')
     local label=$(echo "$browsers" | tr ',' ', ')
     local dur_sec=$(parse_duration_seconds "$duration")
-    local bin=$(find_bin)
-
-    if [ -z "$bin" ]; then
-        echo "media-pause not found. Install: brew install bjorn/homebrew-tap/media-pause"
-        exit 1
-    fi
+    local bin=$(require_bin)
 
     # ── Prevent duplicate timers ──────────────────────
     local current=$(read_current_timer)

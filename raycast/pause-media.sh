@@ -9,7 +9,7 @@
 # @raycast.description Pause browser media immediately, or after an optional countdown
 
 # Optional parameters:
-# @raycast.author bjorn
+# @raycast.author 0xlxx
 # @raycast.keywords timer pause video audio youtube countdown
 
 # Arguments:
@@ -31,11 +31,7 @@ if [ -z "$BROWSERS" ]; then
     exit 1
 fi
 
-BIN=$(find_bin)
-if [ -z "$BIN" ]; then
-    echo "media-pause not found. Install: brew install bjorn/homebrew-tap/media-pause"
-    exit 1
-fi
+BIN=$(require_bin)
 
 if [ -z "$DURATION" ]; then
     # Immediate pause — stop any running timer first

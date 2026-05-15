@@ -9,7 +9,7 @@
 # @raycast.description Countdown then mute audible browser tabs
 
 # Optional parameters:
-# @raycast.author bjorn
+# @raycast.author 0xlxx
 # @raycast.keywords timer mute silent audio sound browser countdown
 
 # Arguments:

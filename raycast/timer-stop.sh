@@ -9,35 +9,24 @@
 # @raycast.description Stop the currently running timer
 
 # Optional parameters:
-# @raycast.author bjorn
+# @raycast.author 0xlxx
 # @raycast.keywords timer stop cancel abort kill
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$DIR/_media-pause-lib.sh"
 
-PIDFILE="/tmp/media-pause.pid"
-STATUSFILE="/tmp/media-pause.status"
-
-if [ ! -f "$PIDFILE" ]; then
+CURRENT=$(read_current_timer)
+if [ -z "$CURRENT" ]; then
     echo "No timer is running."
     exit 0
 fi
 
-PID=$(cat "$PIDFILE" 2>/dev/null | awk '{print $1}')
-if [ -z "$PID" ] || ! kill -0 "$PID" 2>/dev/null; then
-    rm -f "$PIDFILE" "$STATUSFILE"
-    echo "No timer is running."
-    exit 0
-fi
-
+PID=$(echo "$CURRENT" | awk '{print $1}')
 META=$(cat "$STATUSFILE" 2>/dev/null)
 MODE=$(echo "$META" | awk '{print $3}')
 LABEL=$(echo "$META" | awk '{for(i=4;i<=NF-1;i++) printf "%s%s", $i, (i<NF-1?" ":"")}')
 
-kill -TERM "$PID" 2>/dev/null
-sleep 0.3
-kill -KILL "$PID" 2>/dev/null
-rm -f "$PIDFILE" "$STATUSFILE"
+stop_timer "$PID"
 
 osascript -e "
     display notification \"Timer cancelled\"
