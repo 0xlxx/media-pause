@@ -20,18 +20,35 @@ DURATION="${1:-1h}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$DIR/_media-pause-lib.sh"
 
-# PlayPause doesn't need a browser (system media key)
+# Prevent duplicate timers
+CURRENT=$(read_current_timer)
+if [ -n "$CURRENT" ]; then
+    OLD_META=$(cat "$STATUSFILE" 2>/dev/null)
+    OLD_MODE=$(echo "$OLD_META" | awk '{print $3}')
+    OLD_LABEL=$(echo "$OLD_META" | awk '{for(i=4;i<=NF-1;i++) printf "%s%s", $i, (i<NF-1?" ":"")}')
+    OLD_START=$(echo "$OLD_META" | awk '{print $1}')
+    OLD_TOTAL=$(echo "$OLD_META" | awk '{print $2}')
+    OLD_ELAPSED=$(($(date +%s) - OLD_START))
+    OLD_REMAIN=$((OLD_TOTAL - OLD_ELAPSED))
+    [ $OLD_REMAIN -lt 0 ] && OLD_REMAIN=0
+    OLD_FMT=$(printf "%02d:%02d" $((OLD_REMAIN/60)) $((OLD_REMAIN%60)))
+    echo "Timer already running: $OLD_MODE · $OLD_LABEL · ${OLD_FMT}m remaining"
+    echo "Stop it first: run 'Media Pause Stop'"
+    exit 1
+fi
+
 BIN=$(find_bin)
 if [ -z "$BIN" ]; then
     echo "media-pause not found. Install: brew install bjorn/homebrew-tap/media-pause"
     exit 1
 fi
 DUR_SEC=$(parse_duration_seconds "$DURATION")
+INSTANCE_ID="$(date +%s).$$"
 
 "$BIN" -p "$DURATION" >/dev/null 2>&1 &
 PID=$!
-echo "$PID" > "$PIDFILE"
-echo "$(date +%s) $DUR_SEC PlayPause system" > "$STATUSFILE"
+echo "$PID $INSTANCE_ID" > "$PIDFILE"
+echo "$(date +%s) $DUR_SEC PlayPause system $INSTANCE_ID" > "$STATUSFILE"
 
 osascript -e "
     display notification \"$DURATION countdown started\"
@@ -41,12 +58,16 @@ osascript -e "
 
 (
     while kill -0 "$PID" 2>/dev/null; do sleep 1; done
-    rm -f "$PIDFILE" "$STATUSFILE"
-    osascript -e "
-        display notification \"Done — media key sent\"
-        with title \"media-pause — PlayPause\"
-        subtitle \"Countdown finished\"
-    " 2>/dev/null
+    CUR_IID=""
+    [ -f "$PIDFILE" ] && CUR_IID=$(cat "$PIDFILE" 2>/dev/null | awk '{print $2}')
+    if [ "$CUR_IID" = "$INSTANCE_ID" ]; then
+        rm -f "$PIDFILE" "$STATUSFILE"
+        osascript -e "
+            display notification \"Done — media key sent\"
+            with title \"media-pause — PlayPause\"
+            subtitle \"Countdown finished\"
+        " 2>/dev/null
+    fi
 ) &
 disown
 

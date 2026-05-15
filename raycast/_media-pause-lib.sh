@@ -70,12 +70,10 @@ recall_browser() {
 # ── Duration parsing (for status display) ──────────────
 parse_duration_seconds() {
     local input="$1" total=0
-    # Try plain seconds first
     if echo "$input" | grep -qE '^[0-9]+$'; then
         echo "$input"
         return
     fi
-    # Extract each unit independently (avoids sed greedy-matching issues)
     local h=$(echo "$input" | grep -oE '[0-9]+h' | sed 's/h//')
     local m=$(echo "$input" | grep -oE '[0-9]+m' | sed 's/m//')
     local s=$(echo "$input" | grep -oE '[0-9]+s' | sed 's/s//')
@@ -83,6 +81,34 @@ parse_duration_seconds() {
     [ -n "$m" ] && total=$((total + m * 60))
     [ -n "$s" ] && total=$((total + s))
     echo "$total"
+}
+
+# ── Read current timer state ───────────────────────────
+# Returns: "pid instance_id start_ts total_sec mode_label label"
+read_current_timer() {
+    if [ ! -f "$PIDFILE" ] || [ ! -f "$STATUSFILE" ]; then
+        return 1
+    fi
+    local pid=$(cat "$PIDFILE" 2>/dev/null | awk '{print $1}')
+    local iid=$(cat "$PIDFILE" 2>/dev/null | awk '{print $2}')
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$PIDFILE" "$STATUSFILE"
+        return 1
+    fi
+    # Read status as raw line (preserve for caller)
+    echo "$pid $iid"
+    return 0
+}
+
+# ── Stop a running timer ──────────────────────────────
+stop_timer() {
+    local pid="$1"
+    # Kill media-pause process and its children (the watcher)
+    [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null
+    # Give it a moment, then force
+    sleep 0.3
+    [ -n "$pid" ] && kill -KILL "$pid" 2>/dev/null
+    rm -f "$PIDFILE" "$STATUSFILE"
 }
 
 # ── Core: launch timer ──────────────────────────────────
@@ -117,13 +143,33 @@ launch_timer() {
         exit 1
     fi
 
+    # ── Prevent duplicate timers ──────────────────────
+    local current=$(read_current_timer)
+    if [ -n "$current" ]; then
+        local old_meta=$(cat "$STATUSFILE" 2>/dev/null)
+        local old_mode=$(echo "$old_meta" | awk '{print $3}')
+        local old_label=$(echo "$old_meta" | awk '{for(i=4;i<=NF-1;i++) printf "%s%s", $i, (i<NF-1?" ":"")}')
+        local old_start=$(echo "$old_meta" | awk '{print $1}')
+        local old_total=$(echo "$old_meta" | awk '{print $2}')
+        local old_elapsed=0
+        [ -n "$old_start" ] && old_elapsed=$(($(date +%s) - old_start))
+        local old_remain=$((old_total - old_elapsed))
+        [ $old_remain -lt 0 ] && old_remain=0
+        local old_fmt=$(printf "%02d:%02d" $((old_remain/60)) $((old_remain%60)))
+
+        echo "Timer already running: $old_mode · $old_label · ${old_fmt}m remaining"
+        echo "Stop it first: run 'Media Pause Stop'"
+        exit 1
+    fi
+
     # ── Launch ──────────────────────────────────────────
     "$bin" $mode_flag -b "$browsers" "$duration" >/dev/null 2>&1 &
     local pid=$!
-    echo "$pid" > "$PIDFILE"
+    local instance_id="$(date +%s).$$"
 
-    # Write status metadata for progress display
-    echo "$(date +%s) $dur_sec $mode_label $label" > "$STATUSFILE"
+    # Write PID with instance ID so watcher can verify ownership
+    echo "$pid $instance_id" > "$PIDFILE"
+    echo "$(date +%s) $dur_sec $mode_label $label $instance_id" > "$STATUSFILE"
 
     osascript -e "
         display notification \"$duration countdown started for $label\"
@@ -132,14 +178,20 @@ launch_timer() {
     " 2>/dev/null
 
     # Background watcher: poll until PID exits, then notify & cleanup
+    # Uses instance_id to prevent stale watchers from nuking new timer files
     (
         while kill -0 "$pid" 2>/dev/null; do sleep 1; done
-        rm -f "$PIDFILE" "$STATUSFILE"
-        osascript -e "
-            display notification \"Done — media action completed for $label\"
-            with title \"media-pause — $mode_label\"
-            subtitle \"Countdown finished\"
-        " 2>/dev/null
+        # Only cleanup if this instance is still the active one
+        local cur_iid=""
+        [ -f "$PIDFILE" ] && cur_iid=$(cat "$PIDFILE" 2>/dev/null | awk '{print $2}')
+        if [ "$cur_iid" = "$instance_id" ]; then
+            rm -f "$PIDFILE" "$STATUSFILE"
+            osascript -e "
+                display notification \"Done — media action completed for $label\"
+                with title \"media-pause — $mode_label\"
+                subtitle \"Countdown finished\"
+            " 2>/dev/null
+        fi
     ) &
     disown
 
@@ -153,7 +205,7 @@ show_status() {
         return
     fi
 
-    local pid=$(cat "$PIDFILE" 2>/dev/null)
+    local pid=$(cat "$PIDFILE" 2>/dev/null | awk '{print $1}')
     if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
         rm -f "$PIDFILE" "$STATUSFILE"
         echo "No media-pause timer is running."
@@ -165,7 +217,7 @@ show_status() {
     local start_ts=$(echo "$meta" | awk '{print $1}')
     local total_sec=$(echo "$meta" | awk '{print $2}')
     local mode_label=$(echo "$meta" | awk '{print $3}')
-    local label=$(echo "$meta" | awk '{for(i=4;i<=NF;i++) printf "%s%s", $i, (i<NF?" ":"")}')
+    local label=$(echo "$meta" | awk '{for(i=4;i<=NF-1;i++) printf "%s%s", $i, (i<NF-1?" ":"")}')
 
     local now=$(date +%s)
     local elapsed=$((now - start_ts))
@@ -179,7 +231,7 @@ show_status() {
     [ "$total_sec" -gt 0 ] && pct=$(( elapsed * 100 / total_sec ))
     [ $pct -gt 100 ] && pct=100
 
-    # Progress bar (30 chars wide)
+    # Progress bar
     local bar_w=20
     local filled=$(( pct * bar_w / 100 ))
     local empty=$(( bar_w - filled ))
@@ -188,4 +240,5 @@ show_status() {
     echo "$mode_label · $label"
     echo "$bar ${pct}%"
     echo "⏳ $fmt_remain remaining   ⏱ $fmt_elapsed elapsed"
+    echo "Stop: run 'Media Pause Stop'"
 }

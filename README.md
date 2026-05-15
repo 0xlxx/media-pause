@@ -36,9 +36,12 @@ ln -sf "$PWD/media-pause" ~/bin/media-pause
 | `Media Quit` | 倒计时后退出浏览器 | 时长（默认 1h）、浏览器 |
 | `Media PlayPause` | 发送系统媒体键 | 时长（默认 1h） |
 | `Media Pause Status` | 查看运行中计时器的进度 | 无参数，显示进度条 + 剩余/已用时间 |
+| `Media Pause Stop` | 停止当前运行的计时器 | 无参数 |
 
 - 浏览器自动检测已安装的，未安装的自动过滤
 - 首次使用会记住浏览器选择，下次直接回车
+- 同时只能运行一个计时器，重复运行会提示先停止
+- `Media Pause Stop` 可随时手动停止
 - 开始和完成时弹出系统通知
 - 计时在后台运行，不影响工作
 
