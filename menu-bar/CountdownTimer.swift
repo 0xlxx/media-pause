@@ -89,10 +89,7 @@ final class TimerState: ObservableObject {
 
     private func formatShort(_ sec: TimeInterval) -> String {
         let s = Int(max(sec, 0))
-        if s >= 3600 {
-            return String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
-        }
-        return String(format: "%02d:%02d", s / 60, s % 60)
+        return String(format: "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
     }
 
     func stopTimer() {
@@ -163,8 +160,8 @@ struct CountdownTimerApp: App {
             .frame(width: 200)
         } label: {
             if state.isRunning {
-                Text("\(modeIcon(state.modeLabel)) \(state.displayText)")
-                    .monospacedDigit()
+                Text(state.displayText)
+                    .font(.system(size: NSFont.systemFontSize, design: .monospaced))
             } else {
                 Text("⏳")
             }
