@@ -87,6 +87,7 @@ struct Browser {
 
 // Current browsers (set during argument parsing, defaults to Chrome)
 var browsers: [Browser] = []
+var nowMode = false
 
 // MARK: - Version & Help
 
@@ -113,6 +114,7 @@ func showHelp() {
                                 Comma-separated: -b chrome,brave
                                 Repeatable:      -b chrome -b brave
                                 All browsers:    -b all
+          -n, --now             Execute immediately (skip countdown)
           -h, --help            Show this help
           -V, --version         Show version
 
@@ -506,6 +508,7 @@ func main() {
         switch arg {
         case "-h", "--help":    showHelp()
         case "-V", "--version": showVersion()
+        case "-n", "--now":    nowMode = true
         case "-r", "--resume":  mode = "resume"
         case "-p", "--playpause": mode = "playpause"
         case "-m", "--mute":    mode = "mute"
@@ -539,6 +542,75 @@ func main() {
     browsers = browsers.filter { seen.insert($0.key).inserted }
     if browsers.isEmpty {
         browsers = [Browser.byKey("chrome")!]
+    }
+
+    // --- Immediate execution (--now) ---
+    if nowMode {
+        // JS capability pre-flight for pause mode
+        if mode == "pause" {
+            var capErrors: [(Browser, String)] = []
+            for b in browsers {
+                if let err = checkBrowserJSCapability(for: b) {
+                    capErrors.append((b, err))
+                }
+            }
+            if !capErrors.isEmpty {
+                print(hideCursor(), terminator: "")
+                print(clearScreen() + cursorHome(), terminator: "")
+                let errorLines: [String] = capErrors.map { (b, err) in
+                    "\(rgb(255, 180, 50))\(b.displayName): \(err)\(fgReset())"
+                }
+                let lines = ["\(fgBold())⚠  media-pause: Setup Required\(fgReset())", ""] + errorLines
+                let msg = drawBox(width: 62, lines: lines)
+                print(msg)
+                print("")
+                print(showCursor(), terminator: "")
+                fflush(stdout)
+                exit(1)
+            }
+        }
+
+        // Handle resume separately (has its own display logic)
+        if mode == "resume" {
+            let label = browsers.count == 1 ? browsers[0].displayName : "\(browsers.count) browsers"
+            print(hideCursor(), terminator: "")
+            print(clearScreen() + cursorHome(), terminator: "")
+            let box = drawBox(width: 62, lines: [
+                "\(fgBold())▶  Resuming media on \(label) tabs...\(fgReset())",
+                "",
+                "\(rgb(140, 200, 255))Restoring previously-paused media...\(fgReset())",
+            ])
+            print(box)
+            fflush(stdout)
+            var allResults: [BrowserResult] = []
+            for b in browsers {
+                allResults.append(BrowserResult(browser: b, result: resumeMedia(for: b)))
+            }
+            showResults(allResults, boxW: 62, icon: "▶", label: "Resume Media", verb: "Resumed")
+            print("")
+            print(showCursor(), terminator: "")
+            fflush(stdout)
+            return
+        }
+
+        // Execute action immediately (pause, mute, quit, playpause)
+        print(hideCursor(), terminator: "")
+        let boxW: Int
+        if isTTY {
+            var ws = winsize()
+            if ioctl(STDOUT_FILENO, UInt(TIOCGWINSZ), &ws) == 0 && ws.ws_col > 0 {
+                boxW = max(20, min(Int(ws.ws_col), 64))
+            } else {
+                boxW = 64
+            }
+        } else {
+            boxW = 64
+        }
+        executeModeAction(mode: mode, boxW: boxW)
+        print("")
+        print(showCursor(), terminator: "")
+        fflush(stdout)
+        return
     }
 
     // --- Resume mode ---
@@ -613,6 +685,62 @@ func main() {
     }
 
     runTimer(totalSeconds: totalSeconds, mode: mode)
+}
+
+// MARK: - Mode Action Execution (shared by timer completion and --now)
+
+func executeModeAction(mode: String, boxW: Int) {
+    switch mode {
+    case "quit":
+        let quitLabel = browsers.count == 1 ? browsers[0].displayName : "\(browsers.count) browsers"
+        let quitBox = drawBox(width: boxW, lines: [
+            "🚫  Quit \(quitLabel)",
+            "",
+            "\(gradientColor(0.0))Shutting down \(quitLabel)...\(fgReset())",
+        ])
+        print(quitBox)
+        fflush(stdout)
+
+        var quitResults: [BrowserResult] = []
+        for b in browsers {
+            let ok = quitBrowser(for: b)
+            let result = ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [], error: ok ? nil : "\(b.displayName) is not running", jsDisabled: false)
+            quitResults.append(BrowserResult(browser: b, result: result))
+        }
+        showResults(quitResults, boxW: boxW, icon: "🚫", label: "Quit Browsers", verb: "Quit")
+
+    case "mute":
+        var muteResults: [BrowserResult] = []
+        for b in browsers {
+            muteResults.append(BrowserResult(browser: b, result: muteAudibleTabs(for: b)))
+        }
+        showResults(muteResults, boxW: boxW, icon: "🔇", label: "Mute Tabs", verb: "Muted")
+
+    case "playpause":
+        var box = drawBox(width: boxW, lines: [
+            "⏯  Play/Pause",
+            "",
+            "\(rgb(140, 200, 255))Sending system media key...\(fgReset())",
+        ])
+        print(box)
+        fflush(stdout)
+        let ok = sendMediaPlayPause()
+        box = drawBox(width: boxW, lines: [
+            "⏯  Play/Pause",
+            "",
+            ok
+                ? "\(rgb(100, 255, 100))✓  Media key sent\(fgReset())"
+                : "\(rgb(255, 200, 100))⚠  Failed to send media key (may need Accessibility permission)\(fgReset())",
+        ])
+        print("\(cursorHome())\(box)")
+
+    default:
+        var pauseResults: [BrowserResult] = []
+        for b in browsers {
+            pauseResults.append(BrowserResult(browser: b, result: pauseMedia(for: b)))
+        }
+        showResults(pauseResults, boxW: boxW, icon: "⏸", label: "Pause Media", verb: "Paused")
+    }
 }
 
 // MARK: - Timer
@@ -753,65 +881,10 @@ func runTimer(totalSeconds: Int, mode: String) {
     print(clearScreen() + cursorHome(), terminator: "")
 
     let boxW = max(20, min(termW, 64))
-
-    // Execute action
-    switch mode {
-    case "quit":
-        let quitLabel = browsers.count == 1 ? browsers[0].displayName : "\(browsers.count) browsers"
-        let box = drawBox(width: boxW, lines: [
-            "🚫  Quit \(quitLabel)",
-            "",
-            "\(gradientColor(0.0))Shutting down \(quitLabel)...\(fgReset())",
-        ])
-        print(box)
-        fflush(stdout)
-
-        var quitResults: [BrowserResult] = []
-        for b in browsers {
-            let ok = quitBrowser(for: b)
-            let result = ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [], error: ok ? nil : "\(b.displayName) is not running", jsDisabled: false)
-            quitResults.append(BrowserResult(browser: b, result: result))
-        }
-        showResults(quitResults, boxW: boxW, icon: "🚫", label: "Quit Browsers", verb: "Quit")
-        print("")
-        print(showCursor(), terminator: "")
-        fflush(stdout)
-        return
-
-    case "mute":
-        var muteResults: [BrowserResult] = []
-        for b in browsers {
-            muteResults.append(BrowserResult(browser: b, result: muteAudibleTabs(for: b)))
-        }
-        showResults(muteResults, boxW: boxW, icon: "🔇", label: "Mute Tabs", verb: "Muted")
-
-    case "playpause":
-        var box = drawBox(width: boxW, lines: [
-            "⏯  Play/Pause",
-            "",
-            "\(rgb(140, 200, 255))Sending system media key...\(fgReset())",
-        ])
-        print(box)
-        fflush(stdout)
-        let ok = sendMediaPlayPause()
-        box = drawBox(width: boxW, lines: [
-            "⏯  Play/Pause",
-            "",
-            ok
-                ? "\(rgb(100, 255, 100))✓  Media key sent\(fgReset())"
-                : "\(rgb(255, 200, 100))⚠  Failed to send media key (may need Accessibility permission)\(fgReset())",
-        ])
-        print("\(cursorHome())\(box)")
-
-    default:
-        var pauseResults: [BrowserResult] = []
-        for b in browsers {
-            pauseResults.append(BrowserResult(browser: b, result: pauseMedia(for: b)))
-        }
-        showResults(pauseResults, boxW: boxW, icon: "⏸", label: "Pause Media", verb: "Paused")
-    }
+    executeModeAction(mode: mode, boxW: boxW)
 
     print("")
+    print(showCursor(), terminator: "")
     fflush(stdout)
 }
 

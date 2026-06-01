@@ -41,8 +41,11 @@ if [ -z "$DURATION" ]; then
         stop_timer "$STOP_PID"
     fi
     LABEL=$(echo "$BROWSERS" | tr ',' ', ')
-    "$BIN" -b "$BROWSERS" "1s" >/dev/null 2>&1 &
-    echo "Paused $LABEL"
+    if "$BIN" --now -b "$BROWSERS" >/dev/null 2>&1; then
+        echo "Paused $LABEL"
+    else
+        echo "Failed to pause $LABEL — check browser JS permissions"
+    fi
     [ -n "$USER_BROWSER" ] && remember_browser "$USER_BROWSER"
     exit 0
 else
