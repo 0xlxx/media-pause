@@ -106,7 +106,12 @@ read_current_timer() {
         rm -f "$PIDFILE" "$STATUSFILE"
         return 1
     fi
-    # Read status as raw line (preserve for caller)
+    # Verify it's actually media-pause (not a recycled PID matching another process)
+    local pname=$(ps -p "$pid" -o comm= 2>/dev/null)
+    if [ "$pname" != "media-pause" ]; then
+        rm -f "$PIDFILE" "$STATUSFILE"
+        return 1
+    fi
     echo "$pid $iid"
     return 0
 }
@@ -205,7 +210,7 @@ launch_timer() {
     (
         while kill -0 "$pid" 2>/dev/null; do sleep 1; done
         # Only cleanup if this instance is still the active one
-        local cur_iid=""
+        cur_iid=""
         [ -f "$PIDFILE" ] && cur_iid=$(cat "$PIDFILE" 2>/dev/null | awk '{print $2}')
         if [ "$cur_iid" = "$instance_id" ]; then
             rm -f "$PIDFILE" "$STATUSFILE"
@@ -230,6 +235,12 @@ show_status() {
 
     local pid=$(cat "$PIDFILE" 2>/dev/null | awk '{print $1}')
     if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$PIDFILE" "$STATUSFILE"
+        echo "No media-pause timer is running."
+        return
+    fi
+    local pname=$(ps -p "$pid" -o comm= 2>/dev/null)
+    if [ "$pname" != "media-pause" ]; then
         rm -f "$PIDFILE" "$STATUSFILE"
         echo "No media-pause timer is running."
         return

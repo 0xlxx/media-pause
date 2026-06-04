@@ -282,15 +282,17 @@ func preventAppNap() -> NSObjectProtocol? {
 
 func checkBrowserJSCapability(for browser: Browser) -> String? {
     let script = """
-    tell application "\(browser.appleScriptName)"
-        if (count of windows) = 0 then return "OK"
-        try
-            execute (tab 1 of window 1) javascript "true"
-            return "OK"
-        on error errMsg
-            return errMsg
-        end try
-    end tell
+    with timeout of 10 seconds
+        tell application "\(browser.appleScriptName)"
+            if (count of windows) = 0 then return "OK"
+            try
+                execute (tab 1 of window 1) javascript "true"
+                return "OK"
+            on error errMsg
+                return errMsg
+            end try
+        end tell
+    end timeout
     """
 
     guard let appleScript = NSAppleScript(source: script) else {
@@ -339,38 +341,42 @@ func makeAppleScript(js: String, for browser: Browser) -> String {
         .replacingOccurrences(of: "\\", with: "\\\\")
         .replacingOccurrences(of: "\"", with: "\\\"")
     return """
-    tell application "\(browser.appleScriptName)"
-        set okCount to 0
-        set failCount to 0
-        set totalTabs to 0
-        set tabTitles to {}
-        set lastErr to ""
-        set allSameErr to true
-        if (count of windows) = 0 then
-            return {0, 0, {}, "", false, false}
-        end if
-        repeat with w in windows
-            try
-                set windowTabs to tabs of w
-                repeat with t in windowTabs
-                    set totalTabs to totalTabs + 1
-                    try
-                        execute t javascript "\(escapedJS)"
-                        set okCount to okCount + 1
-                        set allSameErr to false
+    with timeout of 120 seconds
+        tell application "\(browser.appleScriptName)"
+            set okCount to 0
+            set failCount to 0
+            set totalTabs to 0
+            set tabTitles to {}
+            set lastErr to ""
+            set allSameErr to true
+            if (count of windows) = 0 then
+                return {0, 0, {}, "", false, false}
+            end if
+            repeat with w in windows
+                try
+                    set windowTabs to tabs of w
+                    repeat with t in windowTabs
+                        set totalTabs to totalTabs + 1
                         try
-                            set end of tabTitles to title of t
+                            with timeout of 5 seconds
+                                execute t javascript "\(escapedJS)"
+                            end timeout
+                            set okCount to okCount + 1
+                            set allSameErr to false
+                            try
+                                set end of tabTitles to title of t
+                            end try
+                        on error e
+                            set failCount to failCount + 1
+                            if lastErr = "" then set lastErr to e
+                            if lastErr is not equal to e then set allSameErr to false
                         end try
-                    on error e
-                        set failCount to failCount + 1
-                        if lastErr = "" then set lastErr to e
-                        if lastErr is not equal to e then set allSameErr to false
-                    end try
-                end repeat
-            end try
-        end repeat
-        return {okCount, totalTabs, tabTitles, lastErr, failCount, allSameErr}
-    end tell
+                    end repeat
+                end try
+            end repeat
+            return {okCount, totalTabs, tabTitles, lastErr, failCount, allSameErr}
+        end tell
+    end timeout
     """
 }
 
@@ -411,7 +417,7 @@ func executeScript(_ script: String) -> ActionResult {
 }
 
 func pauseMedia(for browser: Browser) -> ActionResult {
-    let js = "document.querySelectorAll('[data-media-pause]').forEach(function(e){e.removeAttribute('data-media-pause')});document.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('[data-media-pause]').forEach(function(e){e.removeAttribute('data-media-pause')});f.contentDocument.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}})}catch(_){}})"
+    let js = "document.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}})}catch(_){}})"
     return executeScript(makeAppleScript(js: js, for: browser))
 }
 
@@ -590,7 +596,8 @@ func main() {
             print("")
             print(showCursor(), terminator: "")
             fflush(stdout)
-            return
+            let ok = allResults.allSatisfy { $0.result.error == nil }
+            exit(ok ? 0 : 1)
         }
 
         // Execute action immediately (pause, mute, quit, playpause)
@@ -606,11 +613,11 @@ func main() {
         } else {
             boxW = 64
         }
-        executeModeAction(mode: mode, boxW: boxW)
+        let ok = executeModeAction(mode: mode, boxW: boxW)
         print("")
         print(showCursor(), terminator: "")
         fflush(stdout)
-        return
+        exit(ok ? 0 : 1)
     }
 
     // --- Resume mode ---
@@ -653,6 +660,8 @@ func main() {
             print("")
             print(showCursor(), terminator: "")
             fflush(stdout)
+            let ok = allResults.allSatisfy { $0.result.error == nil }
+            exit(ok ? 0 : 1)
         }
         return
     }
@@ -689,7 +698,7 @@ func main() {
 
 // MARK: - Mode Action Execution (shared by timer completion and --now)
 
-func executeModeAction(mode: String, boxW: Int) {
+func executeModeAction(mode: String, boxW: Int) -> Bool {
     switch mode {
     case "quit":
         let quitLabel = browsers.count == 1 ? browsers[0].displayName : "\(browsers.count) browsers"
@@ -708,6 +717,7 @@ func executeModeAction(mode: String, boxW: Int) {
             quitResults.append(BrowserResult(browser: b, result: result))
         }
         showResults(quitResults, boxW: boxW, icon: "🚫", label: "Quit Browsers", verb: "Quit")
+        return quitResults.allSatisfy { $0.result.error == nil }
 
     case "mute":
         var muteResults: [BrowserResult] = []
@@ -715,6 +725,7 @@ func executeModeAction(mode: String, boxW: Int) {
             muteResults.append(BrowserResult(browser: b, result: muteAudibleTabs(for: b)))
         }
         showResults(muteResults, boxW: boxW, icon: "🔇", label: "Mute Tabs", verb: "Muted")
+        return muteResults.allSatisfy { $0.result.error == nil }
 
     case "playpause":
         var box = drawBox(width: boxW, lines: [
@@ -733,6 +744,7 @@ func executeModeAction(mode: String, boxW: Int) {
                 : "\(rgb(255, 200, 100))⚠  Failed to send media key (may need Accessibility permission)\(fgReset())",
         ])
         print("\(cursorHome())\(box)")
+        return ok
 
     default:
         var pauseResults: [BrowserResult] = []
@@ -740,6 +752,7 @@ func executeModeAction(mode: String, boxW: Int) {
             pauseResults.append(BrowserResult(browser: b, result: pauseMedia(for: b)))
         }
         showResults(pauseResults, boxW: boxW, icon: "⏸", label: "Pause Media", verb: "Paused")
+        return pauseResults.allSatisfy { $0.result.error == nil }
     }
 }
 
