@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260516T013901-403811",
+  "command": "review",
+  "args": [
+    "review",
+    "--limit",
+    "3"
+  ],
+  "rootPath": "/Users/bjorn/dev/media-pause",
+  "headSha": "bcdda09e170b0bd1f94f1208092c467b1a72498a",
+  "startedAt": "2026-05-16T01:39:01.338Z",
+  "finishedAt": "2026-05-16T01:39:01.338Z",
+  "status": "completed",
+  "claimedFeatureIds": [],
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "errors": []
+}

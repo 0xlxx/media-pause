@@ -2,6 +2,7 @@
 
 import Foundation
 import AppKit
+import CoreGraphics
 
 // MARK: - Constants
 
@@ -88,11 +89,38 @@ struct Browser {
 // Current browsers (set during argument parsing, defaults to Chrome)
 var browsers: [Browser] = []
 var nowMode = false
+var chromeProfileDir: String? = nil
 
-// MARK: - Version & Help
+// MARK: - Version & Help & Profile Listing
 
 func showVersion() {
     print("media-pause \(VERSION)")
+    exit(0)
+}
+
+func listProfiles() {
+    let base = NSHomeDirectory() + "/Library/Application Support/Google/Chrome"
+    guard let items = try? FileManager.default.contentsOfDirectory(atPath: base) else {
+        print("No Chrome profiles found")
+        exit(0)
+    }
+    let profiles = items.filter { $0.hasPrefix("Profile") }.sorted()
+    if profiles.isEmpty {
+        print("No named profiles found (using Default profile)")
+        exit(0)
+    }
+    for p in profiles {
+        let prefPath = base + "/\(p)/Preferences"
+        var info = p
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: prefPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let prof = json["profile"] as? [String: Any]
+            if let name = prof?["name"] as? String, !name.isEmpty {
+                info += "  (\(name))"
+            }
+        }
+        print(info)
+    }
     exit(0)
 }
 
@@ -115,6 +143,8 @@ func showHelp() {
                                 Repeatable:      -b chrome -b brave
                                 All browsers:    -b all
           -n, --now             Execute immediately (skip countdown)
+          --profile <dir>       Chrome profile directory (e.g. "Profile 7")
+          --list-profiles       List available Chrome profiles
           -h, --help            Show this help
           -V, --version         Show version
 
@@ -280,7 +310,45 @@ func preventAppNap() -> NSObjectProtocol? {
 
 // MARK: - Browser JS Capability Check
 
+/// If multiple Chrome instances are running, activate the one with the most
+/// on-screen windows (likely the user's main browser, not the automation one).
+/// If a profile directory is specified, activate that profile instead.
+func activateMainChrome() {
+    let chromeProcs = NSWorkspace.shared.runningApplications
+        .filter { $0.bundleIdentifier == Browser.byKey("chrome")!.bundleID }
+    
+    // Activate specified profile if requested
+    if let profile = chromeProfileDir {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = ["-a", "Google Chrome", "--args", "--profile-directory=\(profile)"]
+        try? task.run()
+        task.waitUntilExit()
+        return
+    }
+    
+    if chromeProcs.count <= 1 {
+        chromeProcs.first?.activate()
+        return
+    }
+    // Count on-screen windows per Chrome PID
+    var counts: [pid_t: Int] = [:]
+    if let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] {
+        for w in windows {
+            let pid = w[kCGWindowOwnerPID as String] as? pid_t ?? 0
+            if pid > 0, chromeProcs.contains(where: { $0.processIdentifier == pid }) {
+                counts[pid, default: 0] += 1
+            }
+        }
+    }
+    let best = chromeProcs.max { a, b in
+        (counts[a.processIdentifier] ?? 0) < (counts[b.processIdentifier] ?? 0)
+    } ?? chromeProcs.first
+    best?.activate()
+}
+
 func checkBrowserJSCapability(for browser: Browser) -> String? {
+    activateMainChrome()
     let script = """
     with timeout of 10 seconds
         tell application "\(browser.appleScriptName)"
@@ -429,16 +497,19 @@ func executeScript(_ script: String) -> ActionResult {
 }
 
 func pauseMedia(for browser: Browser) -> ActionResult {
+    activateMainChrome()
     let js = "document.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}})}catch(_){}})"
     return executeScript(makeAppleScript(js: js, for: browser))
 }
 
 func resumeMedia(for browser: Browser) -> ActionResult {
+    activateMainChrome()
     let js = "document.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')})}catch(_){}})"
     return executeScript(makeAppleScript(js: js, for: browser))
 }
 
 func muteAudibleTabs(for browser: Browser) -> ActionResult {
+    activateMainChrome()
     let script = """
     tell application "\(browser.appleScriptName)"
         set okCount to 0
@@ -526,11 +597,19 @@ func main() {
         switch arg {
         case "-h", "--help":    showHelp()
         case "-V", "--version": showVersion()
+        case "--list-profiles": listProfiles()
         case "-n", "--now":    nowMode = true
         case "-r", "--resume":  mode = "resume"
         case "-p", "--playpause": mode = "playpause"
         case "-m", "--mute":    mode = "mute"
         case "-q", "--quit":    mode = "quit"
+        case "--profile":
+            i = args.index(after: i)
+            guard i < args.endIndex else {
+                fputs("Error: --profile requires a profile name (e.g. 'Profile 7')\n", stderr)
+                exit(1)
+            }
+            chromeProfileDir = args[i]
         case "-b", "--browser":
             i = args.index(after: i)
             if i < args.endIndex {
