@@ -285,12 +285,24 @@ func checkBrowserJSCapability(for browser: Browser) -> String? {
     with timeout of 10 seconds
         tell application "\(browser.appleScriptName)"
             if (count of windows) = 0 then return "OK"
-            try
-                execute (tab 1 of window 1) javascript "true"
-                return "OK"
-            on error errMsg
-                return errMsg
-            end try
+            set lastErr to ""
+            set limit to 0
+            repeat with w in windows
+                try
+                    set wTabs to tabs of w
+                    repeat with t in wTabs
+                        set limit to limit + 1
+                        if limit > 10 then return "OK"
+                        try
+                            execute t javascript "true"
+                            return "OK"
+                        on error e
+                            set lastErr to e
+                        end try
+                    end repeat
+                end try
+            end repeat
+            return lastErr
         end tell
     end timeout
     """
@@ -561,18 +573,10 @@ func main() {
                 }
             }
             if !capErrors.isEmpty {
-                print(hideCursor(), terminator: "")
-                print(clearScreen() + cursorHome(), terminator: "")
-                let errorLines: [String] = capErrors.map { (b, err) in
-                    "\(rgb(255, 180, 50))\(b.displayName): \(err)\(fgReset())"
-                }
-                let lines = ["\(fgBold())⚠  media-pause: Setup Required\(fgReset())", ""] + errorLines
-                let msg = drawBox(width: 62, lines: lines)
-                print(msg)
-                print("")
-                print(showCursor(), terminator: "")
-                fflush(stdout)
-                exit(1)
+                // Non-fatal warning: some tabs may not support JS execution
+                // (e.g. automation browsers with JS from Apple Events disabled).
+                // Actual pause will try/catch per-tab, so affected tabs are
+                // simply skipped — working ones in the main browser still pause.
             }
         }
 
@@ -678,18 +682,7 @@ func main() {
             }
         }
         if !capErrors.isEmpty {
-            print(hideCursor(), terminator: "")
-            print(clearScreen() + cursorHome(), terminator: "")
-            let errorLines: [String] = capErrors.map { (b, err) in
-                "\(rgb(255, 180, 50))\(b.displayName): \(err)\(fgReset())"
-            }
-            let lines = ["\(fgBold())⚠  media-pause: Setup Required\(fgReset())", ""] + errorLines
-            let msg = drawBox(width: 62, lines: lines)
-            print(msg)
-            print("")
-            print(showCursor(), terminator: "")
-            fflush(stdout)
-            exit(1)
+            // Non-fatal warning — same reason as --now path
         }
     }
 
@@ -912,7 +905,7 @@ func showResults(_ results: [BrowserResult], boxW: Int, icon: String, label: Str
         let line: String
 
         if r.jsDisabled {
-            line = "\(rgb(255, 180, 50))⚠  \(b.displayName): JS injection disabled — enable in View > Developer > Allow JavaScript from Apple Events\(fgReset())"
+            line = "\(rgb(255, 180, 50))⚠  \(b.displayName): JS injection disabled\(fgReset())"
         } else if let err = r.error, !err.isEmpty {
             line = "\(rgb(255, 180, 50))⚠  \(b.displayName): \(err)\(fgReset())"
         } else if r.affected > 0 {
@@ -925,8 +918,11 @@ func showResults(_ results: [BrowserResult], boxW: Int, icon: String, label: Str
 
     let totalAffected = results.reduce(0) { $0 + $1.result.affected }
     let totalTabs = results.reduce(0) { $0 + $1.result.total }
+    let allDisabled = results.allSatisfy { $0.result.jsDisabled }
     let summary: String
-    if results.contains(where: { $0.result.jsDisabled || $0.result.error != nil }) {
+    if allDisabled {
+        summary = "\(rgb(255, 180, 50))Tip: Close automation/testing Chrome, or enable Allow JavaScript from Apple Events in all Chrome instances\(fgReset())"
+    } else if results.contains(where: { $0.result.jsDisabled || $0.result.error != nil }) {
         summary = ""
     } else {
         summary = "\(rgb(140, 140, 140))Total: \(verb.lowercased()) \(totalAffected) of \(totalTabs) tab\(totalTabs == 1 ? "" : "s") across \(results.count) browser\(results.count == 1 ? "" : "s")\(fgReset())"
