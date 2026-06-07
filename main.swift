@@ -109,17 +109,43 @@ func listProfiles() {
         print("No named profiles found (using Default profile)")
         exit(0)
     }
+    // Read info_cache from Local State for rich profile data
+    let lsPath = base + "/Local State"
+    var cache: [String: [String: Any]] = [:]
+    if let lsData = try? Data(contentsOf: URL(fileURLWithPath: lsPath)),
+       let lsJSON = try? JSONSerialization.jsonObject(with: lsData) as? [String: Any],
+       let infoCache = lsJSON["profile"] as? [String: Any],
+       let ic = infoCache["info_cache"] as? [String: [String: Any]] {
+        cache = ic
+    }
     for p in profiles {
         let prefPath = base + "/\(p)/Preferences"
-        var info = p
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: prefPath)),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let prof = json["profile"] as? [String: Any]
-            if let name = prof?["name"] as? String, !name.isEmpty {
-                info += "  (\(name))"
+        
+        // Person info from info_cache
+        var identity = ""
+        if let ic = cache[p] {
+            if let email = ic["user_name"] as? String, !email.isEmpty {
+                identity = email
+                if let gaia = ic["gaia_name"] as? String, !gaia.isEmpty {
+                    identity = "\(gaia) (\(email))"
+                }
             }
         }
-        print(info)
+        
+        // JS from Apple Events setting
+        var jsEnabled = false
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: prefPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            jsEnabled = (json["browser"] as? [String: Any])?["allow_javascript_apple_events"] as? Bool ?? false
+        }
+        
+        let jsTag = jsEnabled ? "✅ JS enabled" : "❌ JS disabled"
+        if identity.isEmpty {
+            print("\(p)   \(jsTag)")
+        } else {
+            print("\(p)   \(identity)")
+            print("        \(jsTag)")
+        }
     }
     exit(0)
 }
