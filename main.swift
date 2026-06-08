@@ -98,6 +98,29 @@ func showVersion() {
     exit(0)
 }
 
+/// Enable "Allow JavaScript from Apple Events" in all Chrome profiles.
+func fixChromeJS() {
+    let base = NSHomeDirectory() + "/Library/Application Support/Google/Chrome"
+    guard let items = try? FileManager.default.contentsOfDirectory(atPath: base) else { return }
+    let profiles = items.filter { $0.hasPrefix("Profile") }
+    for p in profiles {
+        let prefPath = base + "/\(p)/Preferences"
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: prefPath)),
+              var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+        var browser = json["browser"] as? [String: Any] ?? [:]
+        if browser["allow_javascript_apple_events"] as? Bool == true {
+            print("  \(p): already enabled")
+            continue
+        }
+        browser["allow_javascript_apple_events"] = true
+        json["browser"] = browser
+        if let out = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
+            try? out.write(to: URL(fileURLWithPath: prefPath))
+            print("  \(p): fixed ✅")
+        }
+    }
+}
+
 func listProfiles() {
     let base = NSHomeDirectory() + "/Library/Application Support/Google/Chrome"
     guard let items = try? FileManager.default.contentsOfDirectory(atPath: base) else {
@@ -171,6 +194,7 @@ func showHelp() {
           -n, --now             Execute immediately (skip countdown)
           --profile <dir>       Chrome profile directory (e.g. "Profile 7")
           --list-profiles       List available Chrome profiles
+          --fix-perms           Enable JS from Apple Events in all Chrome profiles (restarts Chrome)
           -h, --help            Show this help
           -V, --version         Show version
 
@@ -624,6 +648,19 @@ func main() {
         case "-h", "--help":    showHelp()
         case "-V", "--version": showVersion()
         case "--list-profiles": listProfiles()
+        case "--fix-perms":
+            print("Quitting Chrome...")
+            for app in NSWorkspace.shared.runningApplications.filter({ $0.bundleIdentifier == "com.google.Chrome" }) {
+                app.terminate()
+            }
+            Thread.sleep(forTimeInterval: 2)
+            fixChromeJS()
+            print("Done. Relaunching Chrome...")
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            task.arguments = ["-a", "Google Chrome"]
+            try? task.run()
+            exit(0)
         case "-n", "--now":    nowMode = true
         case "-r", "--resume":  mode = "resume"
         case "-p", "--playpause": mode = "playpause"
