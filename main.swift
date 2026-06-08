@@ -479,13 +479,34 @@ func checkBrowserJSCapability(for browser: Browser) -> String? {
     if result == "OK" { return nil }
 
     if result.contains("JavaScript") || result.contains("AppleScript") || result.contains("Apple Events") {
+        // Auto-fix: enable JS from Apple Events via menu click
+        fixChromeJS()
+        // Retry check after fix
+        let retryScript = """
+        with timeout of 5 seconds
+            tell application "\(browser.appleScriptName)"
+                if (count of windows) = 0 then return "OK"
+                try
+                    execute (tab 1 of window 1) javascript "true"
+                    return "OK"
+                on error e
+                    return e
+                end try
+            end tell
+        end timeout
+        """
+        if let retryAS = NSAppleScript(source: retryScript) {
+            var retryErr: NSDictionary?
+            let retryResult = retryAS.executeAndReturnError(&retryErr).stringValue ?? ""
+            if retryResult == "OK" {
+                return nil  // fixed successfully
+            }
+        }
         return """
-            \(browser.displayName)'s "Allow JavaScript from Apple Events" is disabled.
-
-            To enable it in \(browser.displayName):
+            \(browser.displayName): "Allow JavaScript from Apple Events" is disabled.
+            media-pause attempted to enable it automatically but failed.
+            Please enable it manually:
               View > Developer > Allow JavaScript from Apple Events
-
-            Then run media-pause again.
             """
     }
 
@@ -750,10 +771,18 @@ func main() {
                 }
             }
             if !capErrors.isEmpty {
-                // Non-fatal warning: some tabs may not support JS execution
-                // (e.g. automation browsers with JS from Apple Events disabled).
-                // Actual pause will try/catch per-tab, so affected tabs are
-                // simply skipped — working ones in the main browser still pause.
+                print(hideCursor(), terminator: "")
+                print(clearScreen() + cursorHome(), terminator: "")
+                let errorLines: [String] = capErrors.map { (b, err) in
+                    "\(rgb(255, 180, 50))\(b.displayName): \(err)\(fgReset())"
+                }
+                let lines = ["\(fgBold())⚠  media-pause: Setup Required\(fgReset())", ""] + errorLines
+                let msg = drawBox(width: 62, lines: lines)
+                print(msg)
+                print("")
+                print(showCursor(), terminator: "")
+                fflush(stdout)
+                exit(1)
             }
         }
 
@@ -859,7 +888,18 @@ func main() {
             }
         }
         if !capErrors.isEmpty {
-            // Non-fatal warning — same reason as --now path
+            print(hideCursor(), terminator: "")
+            print(clearScreen() + cursorHome(), terminator: "")
+            let errorLines: [String] = capErrors.map { (b, err) in
+                "\(rgb(255, 180, 50))\(b.displayName): \(err)\(fgReset())"
+            }
+            let lines = ["\(fgBold())⚠  media-pause: Setup Required\(fgReset())", ""] + errorLines
+            let msg = drawBox(width: 62, lines: lines)
+            print(msg)
+            print("")
+            print(showCursor(), terminator: "")
+            fflush(stdout)
+            exit(1)
         }
     }
 
