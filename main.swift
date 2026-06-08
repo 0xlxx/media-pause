@@ -99,7 +99,52 @@ func showVersion() {
 }
 
 /// Enable "Allow JavaScript from Apple Events" in all Chrome profiles.
+/// Enable JS from Apple Events in Chrome by simulating the menu click.
+/// Works without restarting Chrome. Supports English + Chinese menu names.
 func fixChromeJS() {
+    guard let chrome = NSWorkspace.shared.runningApplications
+        .first(where: { $0.bundleIdentifier == "com.google.Chrome" }) else {
+        fputs("Chrome is not running\n", stderr)
+        exit(1)
+    }
+    chrome.activate()
+    Thread.sleep(forTimeInterval: 0.5)
+    
+    // Try Chinese menu names first, then English
+    let viewNames = ["显示", "View", "查看"]
+    let devNames  = ["开发者", "Developer"]
+    let jsNames   = ["允许 Apple 事件中的 JavaScript", "Allow JavaScript from Apple Events"]
+    
+    for vName in viewNames {
+        for dName in devNames {
+            for jName in jsNames {
+                let script = """
+                tell application "System Events"
+                    tell process "Google Chrome"
+                        try
+                            set viewMenu to menu bar item "\(vName)" of menu bar 1
+                            set devItem to menu item "\(dName)" of menu 1 of viewMenu
+                            set jsItem to menu item "\(jName)" of menu 1 of devItem
+                            click jsItem
+                            return "OK"
+                        end try
+                    end tell
+                end tell
+                """
+                if let ascript = NSAppleScript(source: script) {
+                    var err: NSDictionary?
+                    let result = ascript.executeAndReturnError(&err).stringValue ?? ""
+                    if result == "OK" {
+                        print("✅ JS from Apple Events enabled")
+                        return
+                    }
+                }
+            }
+        }
+    }
+    
+    // Fallback: edit Preferences file directly
+    fputs("Menu click failed, editing Preferences directly...\n", stderr)
     let base = NSHomeDirectory() + "/Library/Application Support/Google/Chrome"
     guard let items = try? FileManager.default.contentsOfDirectory(atPath: base) else { return }
     let profiles = items.filter { $0.hasPrefix("Profile") }
@@ -109,14 +154,14 @@ func fixChromeJS() {
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
         var browser = json["browser"] as? [String: Any] ?? [:]
         if browser["allow_javascript_apple_events"] as? Bool == true {
-            print("  \(p): already enabled")
+            print("  \(p): already enabled ✅")
             continue
         }
         browser["allow_javascript_apple_events"] = true
         json["browser"] = browser
         if let out = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
             try? out.write(to: URL(fileURLWithPath: prefPath))
-            print("  \(p): fixed ✅")
+            print("  \(p): fixed ✅ (restart Chrome to take effect)")
         }
     }
 }
@@ -649,17 +694,7 @@ func main() {
         case "-V", "--version": showVersion()
         case "--list-profiles": listProfiles()
         case "--fix-perms":
-            print("Quitting Chrome...")
-            for app in NSWorkspace.shared.runningApplications.filter({ $0.bundleIdentifier == "com.google.Chrome" }) {
-                app.terminate()
-            }
-            Thread.sleep(forTimeInterval: 2)
             fixChromeJS()
-            print("Done. Relaunching Chrome...")
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            task.arguments = ["-a", "Google Chrome"]
-            try? task.run()
             exit(0)
         case "-n", "--now":    nowMode = true
         case "-r", "--resume":  mode = "resume"
