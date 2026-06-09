@@ -99,71 +99,107 @@ func showVersion() {
 }
 
 /// Enable "Allow JavaScript from Apple Events" in all Chrome profiles.
-/// Enable JS from Apple Events in Chrome by simulating the menu click.
-/// Works without restarting Chrome. Supports English + Chinese menu names.
+/// Enable JS from Apple Events in all Chrome profiles (including custom user-data-dir).
+/// Detects all running Chrome instances and their user data directories.
 func fixChromeJS() {
-    guard let chrome = NSWorkspace.shared.runningApplications
-        .first(where: { $0.bundleIdentifier == "com.google.Chrome" }) else {
-        fputs("Chrome is not running\n", stderr)
-        exit(1)
+    // Collect all Chrome user data directories from running processes
+    var dataDirs: Set<String> = []
+    let defaultBase = NSHomeDirectory() + "/Library/Application Support/Google/Chrome"
+    dataDirs.insert(defaultBase)
+    
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/bin/ps")
+    task.arguments = ["axo", "args"]
+    let outPipe = Pipe()
+    task.standardOutput = outPipe
+    
+    // Read asynchronously to prevent pipe deadlock
+    var outputData = Data()
+    let semaphore = DispatchSemaphore(value: 0)
+    outPipe.fileHandleForReading.readabilityHandler = { handle in
+        let data = handle.availableData
+        if data.isEmpty {
+            outPipe.fileHandleForReading.readabilityHandler = nil
+            semaphore.signal()
+        } else {
+            outputData.append(data)
+        }
     }
-    chrome.activate()
-    Thread.sleep(forTimeInterval: 0.5)
     
-    // Try Chinese menu names first, then English
-    let viewNames = ["显示", "View", "查看"]
-    let devNames  = ["开发者", "Developer"]
-    let jsNames   = ["允许 Apple 事件中的 JavaScript", "Allow JavaScript from Apple Events"]
+    try? task.run()
+    task.waitUntilExit()
+    // Wait for readability handler to finish
+    _ = semaphore.wait(timeout: .now() + 3)
     
-    for vName in viewNames {
-        for dName in devNames {
-            for jName in jsNames {
-                let script = """
-                tell application "System Events"
-                    tell process "Google Chrome"
-                        try
-                            set viewMenu to menu bar item "\(vName)" of menu bar 1
-                            set devItem to menu item "\(dName)" of menu 1 of viewMenu
-                            set jsItem to menu item "\(jName)" of menu 1 of devItem
-                            click jsItem
-                            return "OK"
-                        end try
-                    end tell
-                end tell
-                """
-                if let ascript = NSAppleScript(source: script) {
-                    var err: NSDictionary?
-                    let result = ascript.executeAndReturnError(&err).stringValue ?? ""
-                    if result == "OK" {
-                        print("✅ JS from Apple Events enabled")
-                        return
-                    }
-                }
+    let output = String(data: outputData, encoding: .utf8) ?? ""
+    for line in output.components(separatedBy: "\n") {
+        if line.contains("/Google Chrome") || line.contains("/Chromium") {
+            // Extract --user-data-dir value
+            let parts = line.components(separatedBy: "--user-data-dir=")
+            if parts.count > 1 {
+                let dir = parts[1].components(separatedBy: " ").first ?? ""
+                if !dir.isEmpty { dataDirs.insert(dir) }
             }
         }
     }
     
-    // Fallback: edit Preferences file directly
-    fputs("Menu click failed, editing Preferences directly...\n", stderr)
-    let base = NSHomeDirectory() + "/Library/Application Support/Google/Chrome"
-    guard let items = try? FileManager.default.contentsOfDirectory(atPath: base) else { return }
-    let profiles = items.filter { $0.hasPrefix("Profile") }
-    for p in profiles {
-        let prefPath = base + "/\(p)/Preferences"
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: prefPath)),
-              var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-        var browser = json["browser"] as? [String: Any] ?? [:]
-        if browser["allow_javascript_apple_events"] as? Bool == true {
-            print("  \(p): already enabled ✅")
-            continue
-        }
-        browser["allow_javascript_apple_events"] = true
-        json["browser"] = browser
-        if let out = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
-            try? out.write(to: URL(fileURLWithPath: prefPath))
-            print("  \(p): fixed ✅ (restart Chrome to take effect)")
+    var count = 0
+    for dataDir in dataDirs.sorted() {
+        // Get profile directories in this user data dir
+        guard let items = try? FileManager.default.contentsOfDirectory(atPath: dataDir) else { continue }
+        let profiles = items.filter { $0.hasPrefix("Profile") || $0 == "Default" }.sorted()
+        
+        for p in profiles {
+            let prefPath = dataDir + "/\(p)/Preferences"
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: prefPath)),
+                  var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            var browser = json["browser"] as? [String: Any] ?? [:]
+            let label = dataDir == defaultBase ? p : "\(dataDir) > \(p)"
+            if browser["allow_javascript_apple_events"] as? Bool == true {
+                print("  \(label): already enabled ✅")
+                continue
+            }
+            browser["allow_javascript_apple_events"] = true
+            json["browser"] = browser
+            if let out = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
+                try? out.write(to: URL(fileURLWithPath: prefPath))
+                print("  \(label): fixed ✅")
+                count += 1
+            }
         }
     }
+    
+    // Also try menu click for the frontmost Chrome (live update)
+    let viewNames = ["显示", "View", "查看"]
+    let devNames  = ["开发者", "Developer"]
+    let jsNames   = ["允许 Apple 事件中的 JavaScript", "Allow JavaScript from Apple Events"]
+    for vName in viewNames {
+        var done = false
+        for dName in devNames {
+            for jName in jsNames {
+                if let ascript = NSAppleScript(source: """
+                    tell application "System Events"
+                        tell process "Google Chrome"
+                            try
+                                set devItem to menu item "\(dName)" of menu 1 of menu bar item "\(vName)" of menu bar 1
+                                set jsItem to menu item "\(jName)" of menu 1 of devItem
+                                set mark to value of attribute "AXMenuItemMarkChar" of jsItem
+                                if mark is missing value then click jsItem
+                            end try
+                        end tell
+                    end tell
+                """) {
+                    var err: NSDictionary?
+                    let _ = ascript.executeAndReturnError(&err)
+                    if err == nil { done = true; break }
+                }
+            }
+            if done { break }
+        }
+        if done { break }
+    }
+    
+    print("\(count == 0 ? "All already " : "")fixed")
 }
 
 func listProfiles() {
@@ -481,6 +517,7 @@ func checkBrowserJSCapability(for browser: Browser) -> String? {
     if result.contains("JavaScript") || result.contains("AppleScript") || result.contains("Apple Events") {
         // Auto-fix: enable JS from Apple Events via menu click
         fixChromeJS()
+        
         // Retry check after fix
         let retryScript = """
         with timeout of 5 seconds
@@ -502,6 +539,39 @@ func checkBrowserJSCapability(for browser: Browser) -> String? {
                 return nil  // fixed successfully
             }
         }
+        
+        // Still failing — likely automation Chrome with --enable-automation
+        // Quit automation Chrome instances and retry one more time
+        if let chromeApps = try? FileManager.default.contentsOfDirectory(atPath: "/Applications"),
+           chromeApps.contains("Google Chrome.app") {
+            _ = ""
+        }
+        // Scan all processes for automation Chrome via ps
+        let pstask = Process()
+        pstask.executableURL = URL(fileURLWithPath: "/bin/bash")
+        pstask.arguments = ["-c", "ps axo pid,args | grep 'Google Chrome.*enable-automation' | grep -v grep"]
+        let pspipe = Pipe()
+        pstask.standardOutput = pspipe
+        try? pstask.run()
+        pstask.waitUntilExit()
+        let psdata = pspipe.fileHandleForReading.readDataToEndOfFile()
+        let psstr = String(data: psdata, encoding: .utf8) ?? ""
+        for line in psstr.components(separatedBy: "\n") {
+            let pidStr = line.trimmingCharacters(in: .whitespaces).components(separatedBy: " ").first ?? ""
+            if let pid = pid_t(pidStr), pid > 0 {
+                NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == pid })?.terminate()
+            }
+        }
+        if !psstr.isEmpty { Thread.sleep(forTimeInterval: 1) }
+        
+        if let retryAS2 = NSAppleScript(source: retryScript) {
+            var retryErr2: NSDictionary?
+            let retryResult2 = retryAS2.executeAndReturnError(&retryErr2).stringValue ?? ""
+            if retryResult2 == "OK" {
+                return nil  // fixed after quitting automation Chrome
+            }
+        }
+        
         return """
             \(browser.displayName): "Allow JavaScript from Apple Events" is disabled.
             media-pause attempted to enable it automatically but failed.
