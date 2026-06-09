@@ -683,15 +683,16 @@ func executeScript(_ script: String) -> ActionResult {
 }
 
 func pauseMedia(for browser: Browser) -> ActionResult {
-    activateMainChrome()
-    let js = "document.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}})}catch(_){}})"
-    return executeScript(makeAppleScript(js: js, for: browser))
+    // Use system media key (works with ALL apps, no permissions needed)
+    let ok = pauseAllMedia()
+    return ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [],
+                        error: ok ? nil : "System media pause failed", jsDisabled: false)
 }
 
 func resumeMedia(for browser: Browser) -> ActionResult {
-    activateMainChrome()
-    let js = "document.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')})}catch(_){}})"
-    return executeScript(makeAppleScript(js: js, for: browser))
+    let ok = resumeAllMedia()
+    return ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [],
+                        error: ok ? nil : "System media resume failed", jsDisabled: false)
 }
 
 func muteAudibleTabs(for browser: Browser) -> ActionResult {
@@ -757,17 +758,41 @@ func quitBrowser(for browser: Browser) -> Bool {
 
 typealias MRMediaRemoteSendCommandFunc = @convention(c) (UInt32, AnyObject?) -> Bool
 
-func sendMediaPlayPause() -> Bool {
-    guard let handle = dlopen(
+let MRCommandPause: UInt32 = 1  // kMRPause
+let MRCommandPlay: UInt32 = 0   // kMRPlay
+let MRCommandToggle: UInt32 = 2 // kMRTogglePlayPause
+
+var mrHandle: UnsafeMutableRawPointer? = nil
+var mrSend: MRMediaRemoteSendCommandFunc? = nil
+
+func ensureMediaRemote() {
+    guard mrSend == nil else { return }
+    if let handle = dlopen(
         "/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote",
         RTLD_NOW
-    ) else { return false }
+    ) {
+        mrHandle = handle
+        if let sym = dlsym(handle, "MRMediaRemoteSendCommand") {
+            mrSend = unsafeBitCast(sym, to: MRMediaRemoteSendCommandFunc.self)
+        }
+    }
+}
 
-    guard let sym = dlsym(handle, "MRMediaRemoteSendCommand") else { return false }
+func sendMediaCommand(_ command: UInt32) -> Bool {
+    ensureMediaRemote()
+    return mrSend?(command, nil) ?? false
+}
 
-    let MRMediaRemoteSendCommand = unsafeBitCast(sym, to: MRMediaRemoteSendCommandFunc.self)
-    // kMRTogglePlayPause = 2
-    return MRMediaRemoteSendCommand(2, nil)
+func pauseAllMedia() -> Bool {
+    sendMediaCommand(MRCommandPause)
+}
+
+func resumeAllMedia() -> Bool {
+    sendMediaCommand(MRCommandPlay)
+}
+
+func toggleMediaPlayPause() -> Bool {
+    sendMediaCommand(MRCommandToggle)
 }
 
 // MARK: - Main
@@ -832,29 +857,8 @@ func main() {
 
     // --- Immediate execution (--now) ---
     if nowMode {
-        // JS capability pre-flight for pause mode
-        if mode == "pause" {
-            var capErrors: [(Browser, String)] = []
-            for b in browsers {
-                if let err = checkBrowserJSCapability(for: b) {
-                    capErrors.append((b, err))
-                }
-            }
-            if !capErrors.isEmpty {
-                print(hideCursor(), terminator: "")
-                print(clearScreen() + cursorHome(), terminator: "")
-                let errorLines: [String] = capErrors.map { (b, err) in
-                    "\(rgb(255, 180, 50))\(b.displayName): \(err)\(fgReset())"
-                }
-                let lines = ["\(fgBold())⚠  media-pause: Setup Required\(fgReset())", ""] + errorLines
-                let msg = drawBox(width: 62, lines: lines)
-                print(msg)
-                print("")
-                print(showCursor(), terminator: "")
-                fflush(stdout)
-                exit(1)
-            }
-        }
+        // Pause/resume use system media key — no JS setup needed
+        // Mute mode below handles its own pre-flight
 
         // Handle resume separately (has its own display logic)
         if mode == "resume" {
@@ -949,29 +953,7 @@ func main() {
     // --- All other modes require a duration ---
     let totalSeconds = parseDuration(durStr ?? "1h")
 
-    // JS capability pre-flight (only for modes that inject JavaScript)
-    if mode == "pause" || mode == "resume" {
-        var capErrors: [(Browser, String)] = []
-        for b in browsers {
-            if let err = checkBrowserJSCapability(for: b) {
-                capErrors.append((b, err))
-            }
-        }
-        if !capErrors.isEmpty {
-            print(hideCursor(), terminator: "")
-            print(clearScreen() + cursorHome(), terminator: "")
-            let errorLines: [String] = capErrors.map { (b, err) in
-                "\(rgb(255, 180, 50))\(b.displayName): \(err)\(fgReset())"
-            }
-            let lines = ["\(fgBold())⚠  media-pause: Setup Required\(fgReset())", ""] + errorLines
-            let msg = drawBox(width: 62, lines: lines)
-            print(msg)
-            print("")
-            print(showCursor(), terminator: "")
-            fflush(stdout)
-            exit(1)
-        }
-    }
+    // Pause/resume use system media key — no JS setup needed
 
     runTimer(totalSeconds: totalSeconds, mode: mode)
 }
@@ -1015,7 +997,7 @@ func executeModeAction(mode: String, boxW: Int) -> Bool {
         ])
         print(box)
         fflush(stdout)
-        let ok = sendMediaPlayPause()
+        let ok = toggleMediaPlayPause()
         box = drawBox(width: boxW, lines: [
             "⏯  Play/Pause",
             "",
