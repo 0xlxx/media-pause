@@ -1,10 +1,10 @@
 class MediaPause < Formula
   desc "macOS countdown timer that pauses browser media"
   homepage "https://github.com/0xlxx/media-pause"
-  url "https://github.com/0xlxx/media-pause/archive/refs/tags/v0.1.2.tar.gz"
-  sha256 "f6bb2ff9d2b3b0b528f69481bacc4c23b176380a1cac712ad648e3114d48d339"
+  url "https://github.com/0xlxx/media-pause/archive/refs/tags/v0.1.3.tar.gz"
+  sha256 "6a628322fbf2c5d8952610248ef30f0cd9ad6bbdc938536593ae739003b6d6f9"
   license "MIT"
-  version "0.1.2"
+  version "0.1.3"
   head "https://github.com/0xlxx/media-pause.git", branch: "main"
 
   depends_on :macos
