@@ -683,16 +683,45 @@ func executeScript(_ script: String) -> ActionResult {
 }
 
 func pauseMedia(for browser: Browser) -> ActionResult {
-    // Use system media key (works with ALL apps, no permissions needed)
-    let ok = pauseAllMedia()
-    return ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [],
-                        error: ok ? nil : "System media pause failed", jsDisabled: false)
+    // Quit any automation Chrome first — it hijacks AppleScript routing
+    quitAutomationChrome()
+    
+    let js = "document.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}})}catch(_){}})"
+    let result = executeScript(makeAppleScript(js: js, for: browser))
+    if result.error != nil {
+        _ = pauseAllMedia()
+    }
+    return result
 }
 
 func resumeMedia(for browser: Browser) -> ActionResult {
-    let ok = resumeAllMedia()
-    return ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [],
-                        error: ok ? nil : "System media resume failed", jsDisabled: false)
+    quitAutomationChrome()
+    
+    let js = "document.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')})}catch(_){}})"
+    let result = executeScript(makeAppleScript(js: js, for: browser))
+    if result.error != nil {
+        _ = resumeAllMedia()
+    }
+    return result
+}
+
+func quitAutomationChrome() {
+    let pstask = Process()
+    pstask.executableURL = URL(fileURLWithPath: "/bin/bash")
+    pstask.arguments = ["-c", "ps axo pid,args | grep 'Google Chrome.*enable-automation' | grep -v grep"]
+    let pspipe = Pipe()
+    pstask.standardOutput = pspipe
+    try? pstask.run()
+    pstask.waitUntilExit()
+    let psdata = pspipe.fileHandleForReading.readDataToEndOfFile()
+    let psstr = String(data: psdata, encoding: .utf8) ?? ""
+    for line in psstr.components(separatedBy: "\n") {
+        let pidStr = line.trimmingCharacters(in: .whitespaces).components(separatedBy: " ").first ?? ""
+        if let pid = pid_t(pidStr), pid > 0 {
+            NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == pid })?.terminate()
+        }
+    }
+    if !psstr.isEmpty { Thread.sleep(forTimeInterval: 0.5) }
 }
 
 func muteAudibleTabs(for browser: Browser) -> ActionResult {
@@ -784,11 +813,19 @@ func sendMediaCommand(_ command: UInt32) -> Bool {
 }
 
 func pauseAllMedia() -> Bool {
-    sendMediaCommand(MRCommandToggle)
+    // Simulate hardware play/pause key (F8) via CGEvent — more reliable than MRMediaRemote
+    let source = CGEventSource(stateID: .hidSystemState)
+    guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x64, keyDown: true),
+          let up = CGEvent(keyboardEventSource: source, virtualKey: 0x64, keyDown: false)
+    else { return sendMediaCommand(MRCommandToggle) }
+    down.post(tap: .cghidEventTap)
+    usleep(50000)
+    up.post(tap: .cghidEventTap)
+    return true
 }
 
 func resumeAllMedia() -> Bool {
-    sendMediaCommand(MRCommandToggle)
+    return pauseAllMedia()  // toggle — same key
 }
 
 func toggleMediaPlayPause() -> Bool {
