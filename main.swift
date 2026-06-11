@@ -784,11 +784,11 @@ func sendMediaCommand(_ command: UInt32) -> Bool {
 }
 
 func pauseAllMedia() -> Bool {
-    sendMediaCommand(MRCommandPause)
+    sendMediaCommand(MRCommandToggle)
 }
 
 func resumeAllMedia() -> Bool {
-    sendMediaCommand(MRCommandPlay)
+    sendMediaCommand(MRCommandToggle)
 }
 
 func toggleMediaPlayPause() -> Bool {
