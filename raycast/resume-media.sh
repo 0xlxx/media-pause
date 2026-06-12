@@ -44,7 +44,7 @@ if [ -z "$DURATION" ]; then
     if "$BIN" -r --now -b "$BROWSERS" >/dev/null 2>&1; then
         echo "Resumed $LABEL"
     else
-        echo "Failed to resume $LABEL — check browser JS permissions"
+        echo "Failed to resume $LABEL"
     fi
     [ -n "$USER_BROWSER" ] && remember_browser "$USER_BROWSER"
     exit 0

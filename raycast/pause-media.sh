@@ -44,7 +44,7 @@ if [ -z "$DURATION" ]; then
     if "$BIN" --now -b "$BROWSERS" >/dev/null 2>&1; then
         echo "Paused $LABEL"
     else
-        echo "Failed to pause $LABEL — check browser JS permissions"
+        echo "Failed to pause $LABEL"
     fi
     [ -n "$USER_BROWSER" ] && remember_browser "$USER_BROWSER"
     exit 0

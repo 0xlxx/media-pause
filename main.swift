@@ -829,7 +829,15 @@ func resumeAllMedia() -> Bool {
 }
 
 func toggleMediaPlayPause() -> Bool {
-    sendMediaCommand(MRCommandToggle)
+    // Try CGEvent first (simulates real keyboard), fall back to MRMediaRemote
+    let source = CGEventSource(stateID: .hidSystemState)
+    guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x64, keyDown: true),
+          let up = CGEvent(keyboardEventSource: source, virtualKey: 0x64, keyDown: false)
+    else { return sendMediaCommand(MRCommandToggle) }
+    down.post(tap: .cghidEventTap)
+    usleep(50000)
+    up.post(tap: .cghidEventTap)
+    return true
 }
 
 // MARK: - Main
