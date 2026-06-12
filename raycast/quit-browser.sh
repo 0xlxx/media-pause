@@ -1,25 +1,16 @@
 #!/bin/bash
-
 # Required parameters:
 # @raycast.schemaVersion 1
 # @raycast.title Quit Browser
 # @raycast.mode compact
 # @raycast.icon icon-quit.png
 # @raycast.packageName Media Timer
-# @raycast.description Countdown then quit the browser entirely
+# @raycast.author 0xlxx
+# @raycast.keywords timer quit close browser
 
 # Optional parameters:
-# @raycast.author 0xlxx
-# @raycast.keywords timer quit close browser shutdown countdown
+# @raycast.argument1 { "type": "text", "placeholder": "Duration (optional): 30m | 1h", "optional": true }
+# @raycast.argument2 { "type": "text", "placeholder": "Browser: chrome, brave, all (default: chrome)", "optional": true }
 
-# Arguments:
-# @raycast.argument1 { "type": "text", "placeholder": "Duration: 15m | 30m | 1h | 2h (default 1h)", "optional": true }
-# @raycast.argument2 { "type": "text", "placeholder": "Browser: chrome, brave, all (default: last used)", "optional": true }
-
-DURATION="${1:-1h}"
-BROWSER="${2}"
-
-DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/_media-pause-lib.sh"
-
-launch_timer "quit" "$DURATION" "$BROWSER" "-q" "Quit"
+BROWSER="${2:-chrome}"
+exec media-pause -q -b "$BROWSER" "$1"

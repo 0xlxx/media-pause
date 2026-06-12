@@ -1,18 +1,16 @@
 #!/bin/bash
-
 # Required parameters:
 # @raycast.schemaVersion 1
 # @raycast.title Timer Status
 # @raycast.mode compact
 # @raycast.icon icon-status.png
 # @raycast.packageName Media Timer
-# @raycast.description Show running timer progress with elapsed/remaining time
-
-# Optional parameters:
 # @raycast.author 0xlxx
-# @raycast.keywords timer status progress running check remaining
+# @raycast.keywords timer status pipe
 
-DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/_media-pause-lib.sh"
-
-show_status
+PID=$(pgrep -f "^media-pause " | head -1)
+if [ -z "$PID" ]; then
+    echo "No timer running"
+else
+    echo "Timer running (PID $PID)"
+fi

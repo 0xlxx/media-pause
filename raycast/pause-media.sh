@@ -1,55 +1,21 @@
 #!/bin/bash
-
 # Required parameters:
 # @raycast.schemaVersion 1
 # @raycast.title Pause Media
 # @raycast.mode compact
 # @raycast.icon icon-pause.png
 # @raycast.packageName Media Timer
-# @raycast.description Pause browser media immediately, or after an optional countdown
+# @raycast.author 0xlxx
+# @raycast.keywords timer pause video media countdown
 
 # Optional parameters:
-# @raycast.author 0xlxx
-# @raycast.keywords timer pause video audio youtube countdown
+# @raycast.argument1 { "type": "text", "placeholder": "Duration (optional): 30m | 1h | 3600", "optional": true }
+# @raycast.argument2 { "type": "text", "placeholder": "Browser: chrome, brave, all (default: chrome)", "optional": true }
 
-# Arguments:
-# @raycast.argument1 { "type": "text", "placeholder": "Duration (optional): leave empty to pause now, or 30m | 1h for countdown", "optional": true }
-# @raycast.argument2 { "type": "text", "placeholder": "Browser: chrome, brave, all (default: last used)", "optional": true }
+BROWSER="${2:-chrome}"
 
-export DURATION="${1}"
-export USER_BROWSER="${2}"
-
-DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/_media-pause-lib.sh"
-
-BROWSER="${USER_BROWSER:-$(recall_browser)}"
-INSTALLED=$(detect_installed)
-BROWSERS=$(resolve_browsers "$BROWSER" "$INSTALLED")
-
-if [ -z "$BROWSERS" ]; then
-    echo "No supported browser found. Installed: ${INSTALLED:-none}"
-    exit 1
-fi
-
-BIN=$(require_bin)
-
-if [ -z "$DURATION" ]; then
-    # Immediate pause — stop any running timer first
-    CURRENT=$(read_current_timer)
-    if [ -n "$CURRENT" ]; then
-        STOP_PID=$(echo "$CURRENT" | awk '{print $1}')
-        stop_timer "$STOP_PID"
-    fi
-    LABEL=$(echo "$BROWSERS" | tr ',' ', ')
-    if "$BIN" --now -b "$BROWSERS" >/dev/null 2>&1; then
-        echo "Paused $LABEL"
-    else
-        echo "Failed to pause $LABEL"
-    fi
-    [ -n "$USER_BROWSER" ] && remember_browser "$USER_BROWSER"
-    exit 0
+if [ -z "$1" ]; then
+    exec media-pause --now -b "$BROWSER"
 else
-    # Countdown then pause
-    [ -n "$USER_BROWSER" ] && remember_browser "$USER_BROWSER"
-    launch_timer "pause" "$DURATION" "$BROWSER" "" "Pause"
+    exec media-pause -b "$BROWSER" "$1"
 fi
