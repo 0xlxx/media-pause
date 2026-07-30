@@ -500,11 +500,18 @@ struct BrowserResult {
 func quitAutomationChrome() {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/bin/bash")
-    task.arguments = ["-c", "ps axo pid,args | grep 'Google Chrome.*enable-automation' | grep -v grep"]
+    task.arguments = ["-c", "ps axo pid,args 2>/dev/null | grep 'Google Chrome.*enable-automation' | grep -v grep"]
     let pipe = Pipe()
     task.standardOutput = pipe
     try? task.run()
-    task.waitUntilExit()
+    
+    // Simple polling timeout (1s)
+    let start = Date()
+    while task.isRunning && Date().timeIntervalSince(start) < 1 {
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+    if task.isRunning { task.terminate(); return }
+    
     let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     for line in output.components(separatedBy: "\n") {
         let pidStr = line.trimmingCharacters(in: .whitespaces).components(separatedBy: " ").first ?? ""
@@ -519,54 +526,54 @@ func makeAppleScript(js: String, for browser: Browser) -> String {
     let escapedJS = js.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     return """
     tell application "\(browser.appleScriptName)"
-            set okCount to 0
-            set totalTabs to 0
-            if (count of windows) = 0 then return "{0, 0, {}, ""}"
-            repeat with w in windows
-                try
-                    set wTabs to tabs of w
-                    repeat with t in wTabs
-                        set totalTabs to totalTabs + 1
-                        try
-                            -- Only inject JS into audible tabs to prevent hangs
-                            if (audible of t is true) then
-                                execute t javascript "\(escapedJS)"
-                                set okCount to okCount + 1
-                            end if
-                        end try
-                    end repeat
-                end try
-            end repeat
-            return "{" & okCount & ", " & totalTabs & ", {}, ""}"
-        end tell
+        set okCount to 0
+        set totalTabs to 0
+        set windowCount to count of windows
+        if windowCount = 0 then return "{0, 0}"
+        repeat with wi from 1 to windowCount
+            try
+                set tabCount to count of tabs of window wi
+                if tabCount > 4 then set tabCount to 4
+                repeat with ti from 1 to tabCount
+                    set totalTabs to totalTabs + 1
+                    try
+                        execute (tab ti of window wi) javascript "\(escapedJS)"
+                        set okCount to okCount + 1
+                    end try
+                end repeat
+            end try
+        end repeat
+        return "{" & okCount & ", " & totalTabs & "}"
+    end tell
     """
 }
 
 func executeScript(_ source: String) -> ActionResult {
+    let tmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("media-pause-\(UUID().uuidString).applescript")
+    try? source.write(to: tmp, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-    task.arguments = ["-e", source]
+    task.arguments = [tmp.path]
     let out = Pipe()
     task.standardOutput = out
     task.standardError = Pipe()
     try? task.run()
     
-    let deadline = DispatchTime.now() + .seconds(3)
-    let group = DispatchGroup()
-    group.enter()
-    DispatchQueue.global().async { task.waitUntilExit(); group.leave() }
-    
-    if group.wait(timeout: deadline) == .timedOut {
+    let start = Date()
+    while task.isRunning && Date().timeIntervalSince(start) < 3 {
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+    if task.isRunning {
         task.terminate()
         return ActionResult(affected: 0, total: 0, tabs: [], error: "AppleScript timed out", jsDisabled: false)
     }
     
     let data = out.fileHandleForReading.readDataToEndOfFile()
     let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    
-    // Parse AppleScript list: {okCount, totalTabs, {"title1", "title2"}, "error"}
     let parts = output.dropFirst().dropLast().components(separatedBy: ", ")
-    guard parts.count >= 3 else {
+    guard parts.count >= 2 else {
         return ActionResult(affected: 0, total: 0, tabs: [], error: output.isEmpty ? nil : output, jsDisabled: false)
     }
     let affected = Int(parts[0]) ?? 0
