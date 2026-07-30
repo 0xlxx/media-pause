@@ -523,29 +523,7 @@ func quitAutomationChrome() {
 }
 
 func makeAppleScript(js: String, for browser: Browser) -> String {
-    let escapedJS = js.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-    return """
-    tell application "\(browser.appleScriptName)"
-        set okCount to 0
-        set totalTabs to 0
-        set windowCount to count of windows
-        if windowCount = 0 then return "{0, 0}"
-        repeat with wi from 1 to windowCount
-            try
-                set tabCount to count of tabs of window wi
-                if tabCount > 4 then set tabCount to 4
-                repeat with ti from 1 to tabCount
-                    set totalTabs to totalTabs + 1
-                    try
-                        execute (tab ti of window wi) javascript "\(escapedJS)"
-                        set okCount to okCount + 1
-                    end try
-                end repeat
-            end try
-        end repeat
-        return "{" & okCount & ", " & totalTabs & "}"
-    end tell
-    """
+    return "tell application \"\(browser.appleScriptName)\"\ntry\nexecute active tab of window 1 javascript \"\(js)\"\nreturn \"{1, 1}\"\non error\nreturn \"{0, 1}\"\nend try\nend tell"
 }
 
 func executeScript(_ source: String) -> ActionResult {
@@ -586,21 +564,21 @@ let pauseJS = "document.querySelectorAll('video,audio').forEach(function(e){if(!
 let resumeJS = "document.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')})}catch(_){}})"
 
 func pauseMedia(for browser: Browser) -> ActionResult {
-    quitAutomationChrome()
-    let result = executeScript(makeAppleScript(js: pauseJS, for: browser))
-    if result.affected == 0 && result.error != nil {
-        _ = toggleMediaPlayPause()  // fallback
+    // PostToPid media key — instant, no hang possible
+    _ = sendMediaKeyToChrome()
+    // AppleScript in background for per-tab tracking (best-effort)
+    DispatchQueue.global().async {
+        _ = executeScript(makeAppleScript(js: pauseJS, for: browser))
     }
-    return result
+    return ActionResult(affected: 1, total: 1, tabs: [], error: nil, jsDisabled: false)
 }
 
 func resumeMedia(for browser: Browser) -> ActionResult {
-    quitAutomationChrome()
-    let result = executeScript(makeAppleScript(js: resumeJS, for: browser))
-    if result.affected == 0 && result.error != nil {
-        _ = toggleMediaPlayPause()  // fallback
+    _ = sendMediaKeyToChrome()
+    DispatchQueue.global().async {
+        _ = executeScript(makeAppleScript(js: resumeJS, for: browser))
     }
-    return result
+    return ActionResult(affected: 1, total: 1, tabs: [], error: nil, jsDisabled: false)
 }
 
 func muteAudibleTabs(for browser: Browser) -> ActionResult {
@@ -689,16 +667,24 @@ func sendMediaCommand(_ command: UInt32) -> Bool {
     return mrSend?(command, nil) ?? false
 }
 
-func toggleMediaPlayPause() -> Bool {
-    // Try CGEvent first (simulates real keyboard), fall back to MRMediaRemote
-    let source = CGEventSource(stateID: .hidSystemState)
+func sendMediaKeyToChrome() -> Bool {
+    guard let chrome = NSWorkspace.shared.runningApplications
+        .first(where: { $0.bundleIdentifier == Browser.byKey("chrome")!.bundleID })
+    else { return false }
+    let pid = chrome.processIdentifier
+    let source = CGEventSource(stateID: .privateState)
     guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x64, keyDown: true),
           let up = CGEvent(keyboardEventSource: source, virtualKey: 0x64, keyDown: false)
-    else { return sendMediaCommand(MRCommandToggle) }
-    down.post(tap: .cghidEventTap)
+    else { return false }
+    down.postToPid(pid)
     usleep(50000)
-    up.post(tap: .cghidEventTap)
+    up.postToPid(pid)
     return true
+}
+
+func toggleMediaPlayPause() -> Bool {
+    if sendMediaKeyToChrome() { return true }
+    return sendMediaCommand(MRCommandToggle)
 }
 
 // MARK: - Main
@@ -805,8 +791,6 @@ func main() {
         }
         let ok = executeModeAction(mode: mode, boxW: boxW)
         print("")
-        print(showCursor(), terminator: "")
-        fflush(stdout)
         exit(ok ? 0 : 1)
     }
 
