@@ -495,17 +495,105 @@ struct BrowserResult {
 
 
 
+// MARK: - AppleScript JS injection (short timeouts, exits fast)
+
+func quitAutomationChrome() {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/bin/bash")
+    task.arguments = ["-c", "ps axo pid,args | grep 'Google Chrome.*enable-automation' | grep -v grep"]
+    let pipe = Pipe()
+    task.standardOutput = pipe
+    try? task.run()
+    task.waitUntilExit()
+    let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    for line in output.components(separatedBy: "\n") {
+        let pidStr = line.trimmingCharacters(in: .whitespaces).components(separatedBy: " ").first ?? ""
+        if let pid = pid_t(pidStr), pid > 0 {
+            NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == pid })?.terminate()
+        }
+    }
+    if !output.isEmpty { Thread.sleep(forTimeInterval: 0.3) }
+}
+
+func makeAppleScript(js: String, for browser: Browser) -> String {
+    let escapedJS = js.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    return """
+    tell application "\(browser.appleScriptName)"
+            set okCount to 0
+            set totalTabs to 0
+            if (count of windows) = 0 then return "{0, 0, {}, ""}"
+            repeat with w in windows
+                try
+                    set wTabs to tabs of w
+                    repeat with t in wTabs
+                        set totalTabs to totalTabs + 1
+                        try
+                            -- Only inject JS into audible tabs to prevent hangs
+                            if (audible of t is true) then
+                                execute t javascript "\(escapedJS)"
+                                set okCount to okCount + 1
+                            end if
+                        end try
+                    end repeat
+                end try
+            end repeat
+            return "{" & okCount & ", " & totalTabs & ", {}, ""}"
+        end tell
+    """
+}
+
+func executeScript(_ source: String) -> ActionResult {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    task.arguments = ["-e", source]
+    let out = Pipe()
+    task.standardOutput = out
+    task.standardError = Pipe()
+    try? task.run()
+    
+    let deadline = DispatchTime.now() + .seconds(3)
+    let group = DispatchGroup()
+    group.enter()
+    DispatchQueue.global().async { task.waitUntilExit(); group.leave() }
+    
+    if group.wait(timeout: deadline) == .timedOut {
+        task.terminate()
+        return ActionResult(affected: 0, total: 0, tabs: [], error: "AppleScript timed out", jsDisabled: false)
+    }
+    
+    let data = out.fileHandleForReading.readDataToEndOfFile()
+    let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    
+    // Parse AppleScript list: {okCount, totalTabs, {"title1", "title2"}, "error"}
+    let parts = output.dropFirst().dropLast().components(separatedBy: ", ")
+    guard parts.count >= 3 else {
+        return ActionResult(affected: 0, total: 0, tabs: [], error: output.isEmpty ? nil : output, jsDisabled: false)
+    }
+    let affected = Int(parts[0]) ?? 0
+    let total = Int(parts[1]) ?? 0
+    return ActionResult(affected: affected, total: total, tabs: [], error: nil, jsDisabled: false)
+}
+
+let pauseJS = "document.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}})}catch(_){}})"
+
+let resumeJS = "document.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')})}catch(_){}})"
+
 func pauseMedia(for browser: Browser) -> ActionResult {
-    // CGEvent — instant, always works, no permission needed
-    let ok = toggleMediaPlayPause()
-    return ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [],
-                        error: ok ? nil : "Media key failed", jsDisabled: false)
+    quitAutomationChrome()
+    let result = executeScript(makeAppleScript(js: pauseJS, for: browser))
+    if result.affected == 0 && result.error != nil {
+        _ = toggleMediaPlayPause()  // fallback
+    }
+    return result
 }
 
 func resumeMedia(for browser: Browser) -> ActionResult {
-    let ok = toggleMediaPlayPause()
-    return ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [],
-                        error: ok ? nil : "Media key failed", jsDisabled: false)
+    quitAutomationChrome()
+    let result = executeScript(makeAppleScript(js: resumeJS, for: browser))
+    if result.affected == 0 && result.error != nil {
+        _ = toggleMediaPlayPause()  // fallback
+    }
+    return result
 }
 
 func muteAudibleTabs(for browser: Browser) -> ActionResult {
