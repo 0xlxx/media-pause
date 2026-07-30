@@ -478,113 +478,6 @@ func activateMainChrome() {
     best?.activate()
 }
 
-func checkBrowserJSCapability(for browser: Browser) -> String? {
-    activateMainChrome()
-    let script = """
-    with timeout of 10 seconds
-        tell application "\(browser.appleScriptName)"
-            if (count of windows) = 0 then return "OK"
-            set lastErr to ""
-            set limit to 0
-            repeat with w in windows
-                try
-                    set wTabs to tabs of w
-                    repeat with t in wTabs
-                        set limit to limit + 1
-                        if limit > 10 then return "OK"
-                        try
-                            execute t javascript "true"
-                            return "OK"
-                        on error e
-                            set lastErr to e
-                        end try
-                    end repeat
-                end try
-            end repeat
-            return lastErr
-        end tell
-    end timeout
-    """
-
-    guard let appleScript = NSAppleScript(source: script) else {
-        return "Internal error: could not create AppleScript"
-    }
-    var error: NSDictionary?
-    let result = appleScript.executeAndReturnError(&error).stringValue ?? ""
-
-    if result == "OK" { return nil }
-
-    if result.contains("JavaScript") || result.contains("AppleScript") || result.contains("Apple Events") {
-        // Auto-fix: enable JS from Apple Events via menu click
-        fixChromeJS()
-        
-        // Retry check after fix
-        let retryScript = """
-        with timeout of 5 seconds
-            tell application "\(browser.appleScriptName)"
-                if (count of windows) = 0 then return "OK"
-                try
-                    execute (tab 1 of window 1) javascript "true"
-                    return "OK"
-                on error e
-                    return e
-                end try
-            end tell
-        end timeout
-        """
-        if let retryAS = NSAppleScript(source: retryScript) {
-            var retryErr: NSDictionary?
-            let retryResult = retryAS.executeAndReturnError(&retryErr).stringValue ?? ""
-            if retryResult == "OK" {
-                return nil  // fixed successfully
-            }
-        }
-        
-        // Still failing — likely automation Chrome with --enable-automation
-        // Quit automation Chrome instances and retry one more time
-        if let chromeApps = try? FileManager.default.contentsOfDirectory(atPath: "/Applications"),
-           chromeApps.contains("Google Chrome.app") {
-            _ = ""
-        }
-        // Scan all processes for automation Chrome via ps
-        let pstask = Process()
-        pstask.executableURL = URL(fileURLWithPath: "/bin/bash")
-        pstask.arguments = ["-c", "ps axo pid,args | grep 'Google Chrome.*enable-automation' | grep -v grep"]
-        let pspipe = Pipe()
-        pstask.standardOutput = pspipe
-        try? pstask.run()
-        pstask.waitUntilExit()
-        let psdata = pspipe.fileHandleForReading.readDataToEndOfFile()
-        let psstr = String(data: psdata, encoding: .utf8) ?? ""
-        for line in psstr.components(separatedBy: "\n") {
-            let pidStr = line.trimmingCharacters(in: .whitespaces).components(separatedBy: " ").first ?? ""
-            if let pid = pid_t(pidStr), pid > 0 {
-                NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == pid })?.terminate()
-            }
-        }
-        if !psstr.isEmpty { Thread.sleep(forTimeInterval: 1) }
-        
-        if let retryAS2 = NSAppleScript(source: retryScript) {
-            var retryErr2: NSDictionary?
-            let retryResult2 = retryAS2.executeAndReturnError(&retryErr2).stringValue ?? ""
-            if retryResult2 == "OK" {
-                return nil  // fixed after quitting automation Chrome
-            }
-        }
-        
-        return """
-            \(browser.displayName): "Allow JavaScript from Apple Events" is disabled.
-            media-pause attempted to enable it automatically but failed.
-            Please enable it manually:
-              View > Developer > Allow JavaScript from Apple Events
-            """
-    }
-
-    return result.isEmpty ? nil : result
-}
-
-// MARK: - ActionResult
-
 struct ActionResult {
     let affected: Int
     let total: Int
@@ -600,128 +493,19 @@ struct BrowserResult {
     let result: ActionResult
 }
 
-// MARK: - Browser Actions (via AppleScript + JS injection)
 
-func makeAppleScript(js: String, for browser: Browser) -> String {
-    let escapedJS = js
-        .replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "\"", with: "\\\"")
-    return """
-    with timeout of 120 seconds
-        tell application "\(browser.appleScriptName)"
-            set okCount to 0
-            set failCount to 0
-            set totalTabs to 0
-            set tabTitles to {}
-            set lastErr to ""
-            set allSameErr to true
-            if (count of windows) = 0 then
-                return {0, 0, {}, "", false, false}
-            end if
-            repeat with w in windows
-                try
-                    set windowTabs to tabs of w
-                    repeat with t in windowTabs
-                        set totalTabs to totalTabs + 1
-                        try
-                            with timeout of 5 seconds
-                                execute t javascript "\(escapedJS)"
-                            end timeout
-                            set okCount to okCount + 1
-                            set allSameErr to false
-                            try
-                                set end of tabTitles to title of t
-                            end try
-                        on error e
-                            set failCount to failCount + 1
-                            if lastErr = "" then set lastErr to e
-                            if lastErr is not equal to e then set allSameErr to false
-                        end try
-                    end repeat
-                end try
-            end repeat
-            return {okCount, totalTabs, tabTitles, lastErr, failCount, allSameErr}
-        end tell
-    end timeout
-    """
-}
-
-func executeScript(_ script: String) -> ActionResult {
-    guard let appleScript = NSAppleScript(source: script) else {
-        return ActionResult(affected: 0, total: 0, tabs: [], error: "Internal error: could not create AppleScript", jsDisabled: false)
-    }
-    var error: NSDictionary?
-    let result = appleScript.executeAndReturnError(&error)
-
-    if let error = error {
-        let msg = error[NSAppleScript.errorMessage] as? String ?? "Unknown error"
-        return ActionResult(affected: 0, total: 0, tabs: [], error: msg, jsDisabled: false)
-    }
-
-    let affected  = Int(result.atIndex(1)?.int32Value ?? 0)
-    let total     = Int(result.atIndex(2)?.int32Value ?? 0)
-
-    var titles: [String] = []
-    if let list = result.atIndex(3), list.numberOfItems > 0 {
-        for i in 1...list.numberOfItems {
-            titles.append(list.atIndex(i)?.stringValue ?? "")
-        }
-    }
-
-    let errStr = result.atIndex(4)?.stringValue
-    let err: String? = (errStr?.isEmpty ?? true) ? nil : errStr
-    let failCount = Int(result.atIndex(5)?.int32Value ?? 0)
-    let allSameErr = result.atIndex(6)?.booleanValue ?? false
-
-    let isJSDisabled = (failCount > 0 && affected == 0 && allSameErr &&
-                        (err?.contains("JavaScript") == true ||
-                         err?.contains("AppleScript") == true ||
-                         err?.contains("Apple Events") == true))
-
-    return ActionResult(affected: affected, total: total, tabs: titles,
-                        error: err, jsDisabled: isJSDisabled)
-}
 
 func pauseMedia(for browser: Browser) -> ActionResult {
-    // Quit any automation Chrome first — it hijacks AppleScript routing
-    quitAutomationChrome()
-    
-    let js = "document.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('video,audio').forEach(function(e){if(!e.paused&&!e.ended){try{e.setAttribute('data-media-pause','1')}catch(_){}}try{e.pause()}catch(_){}})}catch(_){}})"
-    let result = executeScript(makeAppleScript(js: js, for: browser))
-    if result.error != nil {
-        _ = pauseAllMedia()
-    }
-    return result
+    // CGEvent — instant, always works, no permission needed
+    let ok = toggleMediaPlayPause()
+    return ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [],
+                        error: ok ? nil : "Media key failed", jsDisabled: false)
 }
 
 func resumeMedia(for browser: Browser) -> ActionResult {
-    quitAutomationChrome()
-    
-    let js = "document.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')});document.querySelectorAll('iframe').forEach(function(f){try{f.contentDocument.querySelectorAll('[data-media-pause]').forEach(function(e){if(e.paused){try{e.play()}catch(_){}}e.removeAttribute('data-media-pause')})}catch(_){}})"
-    let result = executeScript(makeAppleScript(js: js, for: browser))
-    if result.error != nil {
-        _ = resumeAllMedia()
-    }
-    return result
-}
-
-func quitAutomationChrome() {
-    let pstask = Process()
-    pstask.executableURL = URL(fileURLWithPath: "/bin/bash")
-    pstask.arguments = ["-c", "ps axo pid,args | grep 'Google Chrome.*enable-automation' | grep -v grep"]
-    let pspipe = Pipe()
-    pstask.standardOutput = pspipe
-    try? pstask.run()
-    pstask.waitUntilExit()
-    let psdata = pspipe.fileHandleForReading.readDataToEndOfFile()
-    let psstr = String(data: psdata, encoding: .utf8) ?? ""
-    for line in psstr.components(separatedBy: "\n") {
-        let pidStr = line.trimmingCharacters(in: .whitespaces).components(separatedBy: " ").first ?? ""
-        if let pid = pid_t(pidStr), pid > 0 {
-            NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == pid })?.terminate()
-        }
-    }
-    if !psstr.isEmpty { Thread.sleep(forTimeInterval: 0.5) }
+    let ok = toggleMediaPlayPause()
+    return ActionResult(affected: ok ? 1 : 0, total: 1, tabs: [],
+                        error: ok ? nil : "Media key failed", jsDisabled: false)
 }
 
 func muteAudibleTabs(for browser: Browser) -> ActionResult {
@@ -787,8 +571,6 @@ func quitBrowser(for browser: Browser) -> Bool {
 
 typealias MRMediaRemoteSendCommandFunc = @convention(c) (UInt32, AnyObject?) -> Bool
 
-let MRCommandPause: UInt32 = 1  // kMRPause
-let MRCommandPlay: UInt32 = 0   // kMRPlay
 let MRCommandToggle: UInt32 = 2 // kMRTogglePlayPause
 
 var mrHandle: UnsafeMutableRawPointer? = nil
@@ -810,22 +592,6 @@ func ensureMediaRemote() {
 func sendMediaCommand(_ command: UInt32) -> Bool {
     ensureMediaRemote()
     return mrSend?(command, nil) ?? false
-}
-
-func pauseAllMedia() -> Bool {
-    // Simulate hardware play/pause key (F8) via CGEvent — more reliable than MRMediaRemote
-    let source = CGEventSource(stateID: .hidSystemState)
-    guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x64, keyDown: true),
-          let up = CGEvent(keyboardEventSource: source, virtualKey: 0x64, keyDown: false)
-    else { return sendMediaCommand(MRCommandToggle) }
-    down.post(tap: .cghidEventTap)
-    usleep(50000)
-    up.post(tap: .cghidEventTap)
-    return true
-}
-
-func resumeAllMedia() -> Bool {
-    return pauseAllMedia()  // toggle — same key
 }
 
 func toggleMediaPlayPause() -> Bool {
