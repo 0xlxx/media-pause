@@ -1,4 +1,8 @@
-# Compiled binary
+# SwiftPM build artifacts
+.build/
+.swiftpm/
+
+# Compiled binary (legacy)
 media-pause
 
 # macOS
@@ -15,4 +19,7 @@ menu-bar/CountdownTimer.app/
 *.swp
 *.swo
 *~
-/tmp/
+
+# Local secrets & run data
+.env
+.pi/

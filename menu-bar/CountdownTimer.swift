@@ -220,8 +220,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "resume": return "\u{25B6}"
         case "mute":   return "\u{1F507}"
         case "quit":   return "\u{23FB}"
-        case "key":    return "\u{2328}"
-        default:       return "\u{23F3}"
+        case "key", "playpause": return "\u{2328}"
+        default:                 return "\u{23F3}"
         }
     }
 }

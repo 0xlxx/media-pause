@@ -1,71 +1,64 @@
 # media-pause
 
-macOS 倒计时结束后暂停浏览器标签页中所有视频/音频播放。
+macOS 上控制 Chrome 音视频的**定时暂停 / 恢复**工具。倒计时结束后暂停浏览器标签页中的全部音视频，也可立即暂停、恢复或"恢复播放 N 秒后再暂停"。
+
+## 特性
+
+- ⏸ **定时暂停**：`media-pause 45m` 倒计时后暂停 Chrome 所有标签页音视频
+- ▶ **定时/即时恢复**：`-r` 立即恢复；`-r 10s` 恢复播放 10 秒后自动再暂停
+- ⚡ **即时操作**：`--now` 跳过倒计时立即执行
+- 🔀 **多通道降级**（诚实报告每个通道结果）：
+  1. **CDP**（Chrome DevTools Protocol）——若 Chrome 以 `--remote-debugging-port=9222` 运行则优先，无需 Apple Events 权限
+  2. **AppleScript JS**——逐标签页暂停/恢复 `<video>/<audio>`（需开启 *Allow JavaScript from Apple Events*，可用 `media-pause setup` 自动修复）
+  3. **媒体键**——CGEvent 投递到浏览器实例
+  4. **系统媒体键**——存在 Now Playing 会话时兜底
+- 🌐 **多浏览器**：chrome / brave / edge / arc / chromium / opera / vivaldi（`-b all`）
+- 🖥 终端倒计时（Space 暂停/恢复计时器与媒体，Ctrl+C 取消）、菜单栏倒计时、Raycast 命令
+- 🧪 可测试：单元测试 + 编译测试 + 变异测试（见下文）
 
 ## 安装
 
-### Homebrew (推荐)
+### 从源码构建（开发）
 
 ```bash
-brew install 0xlxx/homebrew-tap/media-pause
+swift build -c release --product media-pause
+ln -sf "$PWD/.build/release/media-pause" ~/bin/media-pause
 ```
 
-### 手动安装
+要求 macOS Swift 工具链（含 SwiftPM），无需 Xcode、无外部依赖。
+
+### Homebrew
 
 ```bash
-swiftc -O -o media-pause main.swift
-ln -sf "$PWD/media-pause" ~/bin/media-pause
+brew install 0xlxx/homebrew-tap/media-pause   # 待 v4.0.0 tag 后可用
 ```
-
-要求 macOS 自带 Swift 工具链，无需额外依赖。
 
 ### Raycast 集成
 
-将 `raycast/` 目录添加到 Raycast 脚本目录：
+将 `raycast/` 目录加入 Raycast 脚本目录：
 
-1. Raycast 设置 → Extensions → 点击 `+` → Script Directory
-2. 选择本仓库的 `raycast/` 目录
+| 命令 | 用途 |
+|------|------|
+| `Pause Media` | 暂停媒体（无时长=立即暂停） |
+| `Resume Media` | 恢复播放（可带时长，到时再暂停） |
+| `Mute Tabs` | 倒计时后静音标签页 |
+| `Quit Browser` | 倒计时后退出浏览器 |
+| `Play/Pause Key` | 发送系统媒体键 |
+| `Timer Status` | 查看运行中计时器进度 |
+| `Timer Stop` | 停止当前计时器 |
 
-**可用命令**（搜索即路由）：
-
-| 命令 | 用途 | 参数 |
-|------|------|------|
-| `Pause Media` | 暂停媒体（无时长=立即暂停） | 时长（可选）、浏览器（默认记住上次） |
-| `Resume Media` | 恢复播放（无时长=立即恢复） | 时长（可选）、浏览器 |
-| `Mute Tabs` | 倒计时后静音标签页 | 时长（默认 1h）、浏览器 |
-| `Quit Browser` | 倒计时后退出浏览器 | 时长（默认 1h）、浏览器 |
-| `Play/Pause Key` | 发送系统媒体键 | 时长（默认 1h） |
-| `Timer Status` | 查看运行中计时器的进度 | 无参数，显示进度条 + 剩余/已用时间 |
-| `Timer Stop` | 停止当前运行的计时器 | 无参数 |
-
-- 浏览器自动检测已安装的，未安装的自动过滤
-- 首次使用会记住浏览器选择，下次直接回车
-- 同时只能运行一个计时器；不带时长执行会先停止当前计时器再立即操作
-- `Timer Stop` 可随时手动停止
-- 开始和完成时弹出系统通知
-- 计时在后台运行，不影响工作
-
-### 菜单栏计时器
-
-启动任一定时命令后，菜单栏会自动显示倒计时：
-
-```
-00:22:30     ← 剩余时间每秒更新，固定宽度不跳动
-```
-
-点击菜单栏图标可展开详情：模式、标签、进度条、剩余/已用时间，以及停止按钮。
-
-构建方式：
+### 菜单栏倒计时
 
 ```bash
-bash menu-bar/build.sh           # 编译为 CountdownTimer.app
-open menu-bar/CountdownTimer.app # 手动启动（Raycast 命令会自动启动）
+bash menu-bar/build.sh
+open menu-bar/CountdownTimer.app
 ```
 
 ## 用法
 
 ```
-media-pause [选项] [时长]
+media-pause [options] [duration]
+media-pause status | stop | setup
 ```
 
 ### 模式
@@ -74,10 +67,19 @@ media-pause [选项] [时长]
 |------|------|
 | (默认) | 倒计时结束后暂停所有标签页媒体 |
 | `-r, --resume` | 恢复播放（可带时长：恢复 → 倒计时 → 再暂停） |
-| `-p, --playpause` | 倒计时结束后发送系统媒体键（对所有 App 生效） |
+| `-p, --playpause` | 发送系统媒体键（对所有 App 生效） |
 | `-m, --mute` | 倒计时结束后静音所有发声标签页 |
 | `-q, --quit` | 倒计时结束后退出浏览器 |
-| `-b, --browser` | 指定浏览器，支持逗号分隔 (`chrome,brave`)、重复 (`-b chrome -b brave`) 和 `all`，默认 chrome |
+| `-b, --browser` | 指定浏览器（`chrome,brave`、`all`），默认 chrome |
+| `-n, --now` | 立即执行，跳过倒计时 |
+
+### 命令
+
+| 命令 | 说明 |
+|------|------|
+| `status` | 查看运行中计时器（剩余/已用/模式） |
+| `stop` | 停止运行中的计时器 |
+| `setup` | 在所有 Chrome profile 中启用 *Allow JavaScript from Apple Events*（等价旧 `--fix-perms`） |
 
 ### 时长格式
 
@@ -86,26 +88,65 @@ media-pause [选项] [时长]
 ### 示例
 
 ```bash
-media-pause 45m              # 45 分钟后暂停媒体
-media-pause -r               # 立即恢复上次暂停的媒体
-media-pause -r 10s           # 恢复播放 10 秒后再暂停
-media-pause -b brave 30m     # 30 分钟后暂停 Brave 的媒体
-media-pause -b chrome,brave 30m  # 同时暂停 Chrome 和 Brave
-media-pause -b all 30m       # 暂停所有已安装浏览器的媒体
-media-pause -b edge -q 1h    # 1 小时后退出 Edge
-media-pause -m 1h            # 1 小时后静音所有发声标签页
-media-pause -p 30m           # 30 分钟后发送媒体键（Spotify、IINA 等也可用）
+media-pause 45m                # 45 分钟后暂停 Chrome 媒体
+media-pause --now              # 立即暂停
+media-pause -r                 # 立即恢复
+media-pause -r 10s             # 恢复播放 10 秒后再暂停
+media-pause -b brave 30m       # 30 分钟后暂停 Brave
+media-pause -b chrome,brave 1h # 同时暂停 Chrome 和 Brave
+media-pause -b all 1h          # 暂停所有已安装浏览器
+media-pause status             # 查看计时器进度
 ```
 
-计时过程中按**空格**暂停/恢复，**Ctrl+C** 取消。
+### CDP 优先（可选）
 
-## 前置条件
+让 Chrome 以调试端口运行，暂停/恢复将优先走 CDP 通道（无需 Apple Events 权限）：
 
-pause/resume/mute 模式需要浏览器开启：
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222
+```
 
-> View → Developer → **Allow JavaScript from Apple Events**
+## 测试
 
-工具会在启动时自动检测此设置，未开启时会给出引导提示。
+```bash
+bash scripts/verify.sh        # 编译测试（debug+release）+ 单元测试 + 冒烟
+swift run media-pause-tests   # 仅单元测试（88 个）
+python3 scripts/mutate.py     # 变异测试（一轮约 1-2 分钟，杀灭率 92%+）
+```
+
+> 说明：本机只有 Command Line Tools（无 Xcode）时没有 XCTest，因此单元测试使用自带轻量断言框架（`Tests/MediaPauseCoreTests/TestKit.swift`），变异测试为自定义 runner（`scripts/mutate.py`）。
+
+## 架构
+
+```
+Sources/MediaPauseCore/   核心逻辑（纯逻辑可测）
+  Duration.swift          时长解析/格式化
+  Arguments.swift         CLI 参数解析 → Command
+  Browser.swift           浏览器注册表
+  MediaJS.swift           JS 表达式与计数器解析
+  Channels.swift          通道协议 + MediaEngine 降级引擎
+  AppleScriptChannel.swift JS 注入/静音通道（Process 可注入）
+  MediaKeyChannel.swift   媒体键 + MediaRemote 通道
+  CDPChannel.swift        CDP 协议助手 + 通道（Transport 可注入）
+  CountdownTimer.swift    可暂停倒计时状态机（Clock 可注入）
+  IPC.swift               计时器状态文件编解码
+  Setup.swift             启用 Apple Events JS（Preferences 编辑）
+  Report.swift            结果格式化
+Sources/media-pause/      可执行层（TUI、通道工厂、编排）
+Tests/MediaPauseCoreTests/ 单元测试 + 轻量断言框架
+scripts/                   verify.sh（编译测试） / mutate.py（变异测试）
+```
+
+进程间通信：`/tmp/media-pause.pid`、`/tmp/media-pause.status`（格式见 `IPC.swift`），菜单栏与 Raycast 读取同一格式。
+
+## 变更记录（v4.0 重构）
+
+- 单文件 1381 行 → SwiftPM 多模块分层
+- 新增 CDP 通道（Chrome DevTools Protocol）
+- 新增 `status` / `stop` / `setup` 子命令
+- 移除 SIGSTOP 冻结（损坏媒体管线）、`--profile` / `--list-profiles`
+- 新增单元测试（88 个）、编译测试、变异测试
+- 保留 IPC 文件格式，菜单栏 / Raycast 兼容
 
 ## 许可
 

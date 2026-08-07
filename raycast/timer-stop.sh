@@ -6,6 +6,6 @@
 # @raycast.icon icon-stop.png
 # @raycast.packageName Media Timer
 # @raycast.author 0xlxx
-# @raycast.keywords timer stop kill cancel
+# @raycast.keywords timer stop cancel
 
-pkill -f "^media-pause " || echo "No timer running"
+exec media-pause stop

@@ -5,57 +5,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Development
 
 ```bash
-# Build the CLI binary (single-file Swift, no dependencies)
-swiftc -O -o media-pause main.swift
+# Build the CLI binary (SwiftPM, zero external dependencies)
+swift build -c release --product media-pause
+ln -sf "$PWD/.build/release/media-pause" ~/bin/media-pause
+
+# Run unit tests (88 tests, custom lightweight framework — no XCTest needed)
+swift run media-pause-tests
+
+# Compilation test + smoke test
+bash scripts/verify.sh
+
+# Mutation testing (one run ~1-2 min; consumes resources — use sparingly)
+python3 scripts/mutate.py
 
 # Build the menu bar app
 bash menu-bar/build.sh
 open menu-bar/CountdownTimer.app
-
-# Install locally for dev
-ln -sf "$PWD/media-pause" ~/bin/media-pause
 ```
 
-There is no test suite, package manager, or linting setup. The project is a single Swift file compiled with the system `swiftc`.
+Requires macOS Swift toolchain (SwiftPM). Works with **Command Line Tools only** — there is no Xcode/XCTest dependency.
 
-## Architecture
+## Architecture (v4.0)
 
-**Core binary** (`main.swift`): A single ~860-line Swift script using `#!/usr/bin/swift`. It imports Foundation and AppKit only — no Swift Package Manager, no external dependencies. The system `swiftc` toolchain is the only build requirement.
+**SwiftPM package** with three targets:
 
-Key subsystems within `main.swift`:
-- **Browser model** (lines 67–89): Defines supported Chromium-based browsers with their bundle IDs and AppleScript names. The `all` pseudo-browser expands to every defined browser.
-- **Duration parser** (line 152): Accepts seconds (`3600`), human formats (`1h`, `30m`, `1h30m`, `2h15m30s`).
-- **Browser actions** (lines 335–494): Each action (pause, resume, mute, quit, play/pause key) uses a different mechanism:
-  - **Pause/Resume**: AppleScript → execute JavaScript in each browser tab. Uses `data-media-pause` DOM attributes to track which elements were paused, so resume can target only those.
-  - **Mute**: AppleScript to set tab `muted` property via native browser API (no JS needed).
-  - **Quit**: `NSWorkspace.shared.runningApplications` → `terminate()`.
-  - **Play/Pause key**: dlopen + dlsym into `MediaRemote.framework` (private system framework) to call `MRMediaRemoteSendCommand(2, nil)` — the same API Control Center uses.
-- **JS capability check** (line 281): Pre-flight AppleScript test to detect whether "Allow JavaScript from Apple Events" is enabled in the browser. Runs before pause/resume modes.
-- **Countdown loop** (line 620): Terminal TUI with progress bar, spinner, color gradient (blue→yellow→red), and Space-key pause/resume (via raw stdin). Also writes PID and status files to `/tmp/` for external readers.
-- **Terminal UI** (lines 187–268): TTY-aware ANSI rendering with box drawing, color gradients, and partial block characters for sub-character progress bar resolution. Gracefully degrades when stdout is not a TTY.
+- `MediaPauseCore` (`Sources/MediaPauseCore/`) — all logic, designed for testability:
+  - **Pure logic** (unit-tested): `Duration.swift`, `Arguments.swift`, `Browser.swift`, `MediaJS.swift`, `IPC.swift`, `CountdownTimer.swift`, `CDPChannel.swift` (protocol helpers), `Report.swift`, `Setup.swift` (Preferences editing).
+  - **Channels** behind small protocols so tests inject fakes:
+    - `ProcessRunning` (`AppleScriptChannel.swift`, `MuteChannel.swift`) — osascript execution.
+    - `CDPTransport` (`CDPChannel.swift`) — target discovery + Runtime.evaluate.
+    - `Clock` (`CountdownTimer.swift`) — injectable time source.
+    - `MediaEngine` (`Channels.swift`) — runs channels in priority order; fallback channel only fires when everything before it failed; appends an honest failure result when nothing succeeded.
+- `media-pause` (`Sources/media-pause/`) — thin executable layer: TUI, channel factory (CDP probe → AppleScript → media key), orchestration, status/stop/setup, `URLSessionCDPTransport`.
+- `media-pause-tests` (`Tests/MediaPauseCoreTests/`) — custom assertion framework (`TestKit.swift`) + `main.swift` test registry. Run with `swift run media-pause-tests`.
 
-**Menu bar app** (`menu-bar/`): A SwiftUI `@main` app using `NSStatusItem` with a monospaced-digit countdown display. It reads timer state from `/tmp/media-pause.pid` and `/tmp/media-pause.status` files — polling every second. The PID file contains `"<pid> <instance_id>"`; the status file contains `"<start_ts> <total_sec> <mode> <label> <instance_id>"`. The menu bar app verifies the instance ID matches to avoid displaying stale data from a previous timer.
-
-**Raycast integration** (`raycast/`): Shell scripts following Raycast's schema convention. Each command script sources `_media-pause-lib.sh` (a bash 3.2-compatible shared library). The library handles:
-- Binary discovery (brew, /opt/homebrew, /usr/local, ~/bin)
-- Browser detection by checking `/Applications/` and `~/Applications/`
-- Browser preference memory via `~/.cache/media-pause/last-browser`
-- Timer lifecycle: launches the core binary in background, writes PID/status files, spawns a background watcher that cleans up and sends a notification when the timer completes
-- Instance ID mechanism to prevent stale watchers from nuking a new timer's PID/status files
-
-**Homebrew tap** (`homebrew-tap/Formula/media-pause.rb`): Standard Homebrew formula. Compiles with `swiftc -O`, installs to bin, no runtime dependencies beyond macOS.
-
-## Inter-process communication
-
-The core binary, Raycast scripts, and menu bar app communicate through two temporary files:
-- `/tmp/media-pause.pid` — `"<pid> <instance_id>"`
-- `/tmp/media-pause.status` — `"<start_timestamp> <total_seconds> <mode> <label> <instance_id>"`
-
-Only one timer can run at a time. Starting a new timer when one is running will fail with a message to stop the current timer first (`Timer Stop`).
+**Channel priority** (per pause/resume action): CDP (if a Chrome debug port is reachable) → AppleScript JS injection → media key (CGEvent to PID) → system media key (MediaRemote, only when a Now Playing session exists).
 
 ## Important conventions
 
-- Browser preference is remembered in `~/.cache/media-pause/last-browser` after the user explicitly chooses a browser, not after using the default.
-- The `instance_id` mechanism (timestamp + PID combination) is critical — it prevents the background watcher process from cleaning up PID/status files that belong to a newer timer.
-- All Raycast scripts use bash 3.2 (macOS default) — no associative arrays, no `readarray`/`mapfile`.
-- The menu bar app is launched with `open -g` (background, no dock icon) and uses `LSUIElement = true` in Info.plist.
+- **Keep Core AppKit-free where possible.** `MediaKeyChannel.swift` currently imports AppKit/CoreGraphics; everything else should stay pure Foundation so logic is unit-testable without a GUI. Channels receive platform hooks via closures (e.g. `instances: () -> [NSRunningApplication]`, `activate: () -> Void`).
+- **JS expressions must stay AppleScript-embeddable**: no double quotes, no newlines (`MediaJS.isAppleScriptEmbeddable` guards this in tests).
+- **AppleScript if/else must be multi-line** in `AppleScriptScripts.actionScript` — one-line `if … then … else` fails to compile when the else clause contains `&` concatenation.
+- **IPC format is stable** (`/tmp/media-pause.pid`, `/tmp/media-pause.status`): menu bar app and Raycast depend on it. See `IPC.swift` for the wire format. `instanceID` (last field) prevents stale watchers from touching a newer timer.
+- **Automation instances must be quit before JS injection.** With multiple Chrome instances (e.g. a `chrome-devtools-mcp` instance), AppleScript always routes to the automation instance (no windows) and JS injection silently fails (`-1719`). `quitAutomationInstances(of:)` in `Run.swift` terminates them before the JS channel runs; `AutomationArgs.isAutomation` (Core, unit-tested) detects them.
+- **No SIGSTOP freezing** — it corrupts Chrome's media pipeline. Do not reintroduce it.
+- **Mutation testing is expensive** (~1-2 min per run, rebuilds in a temp workspace). Run only when the test suite changes; verify.sh is the cheap gate.
+- The `media-pause` executable target uses `main.swift` as its entry point; Core has no top-level code.
