@@ -2,8 +2,8 @@
 .build/
 .swiftpm/
 
-# Compiled binary (legacy)
-media-pause
+# Compiled binary (root only — do NOT ignore Sources/media-pause/)
+/media-pause
 
 # macOS
 .DS_Store
