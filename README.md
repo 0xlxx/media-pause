@@ -13,7 +13,7 @@ macOS 上控制 Chrome 音视频的**定时暂停 / 恢复**工具。倒计时�
   3. **媒体键**——CGEvent 投递到浏览器实例
   4. **系统媒体键**——存在 Now Playing 会话时兜底
 - 🌐 **多浏览器**：chrome / brave / edge / arc / chromium / opera / vivaldi（`-b all`）
-- 🖥 终端倒计时（Space 暂停/恢复计时器与媒体，Ctrl+C 取消）、菜单栏倒计时、Raycast 命令
+- 🖥 终端倒计时（Space 暂停/恢复计时器与媒体，Ctrl+C 取消）、菜单栏倒计时、Raycast 扩展（Extension）
 - 🧪 可测试：单元测试 + 编译测试 + 变异测试（见下文）
 
 ## 安装
@@ -33,34 +33,33 @@ ln -sf "$PWD/.build/release/media-pause" ~/bin/media-pause
 brew install 0xlxx/homebrew-tap/media-pause   # 待 v4.0.0 tag 后可用
 ```
 
-### Raycast 集成（支持 Raycast 2.0 Beta）
+### Raycast 扩展（Extension，支持 Raycast 2.0 Beta）
 
-把仓库的 `raycast/` 目录添加为 Raycast 的 **Script Directory**：
+按 Raycast 官方推荐方式，仓库提供正式的 **Raycast Extension**（`extension/`，TypeScript + `@raycast/api`，Node 已随 Raycast 2.0 内置），共 6 个命令：
 
-1. 先构建并安装二进制（一次性）：
+| 命令 | 用途 |
+|------|------|
+| `Pause Media` | 暂停媒体（无时长=立即暂停；有时长=倒计时后暂停） |
+| `Resume Media` | 恢复播放（无时长=立即恢复；有时长=恢复 N 秒后再暂停） |
+| `Mute Tabs` | 静音标签页（无时长=立即；有时长=倒计时后静音） |
+| `Quit Browser` | 退出浏览器（无时长=立即；有时长=倒计时后退出） |
+| `Timer Status` | 查看运行中计时器进度 |
+| `Timer Stop` | 停止计时器 |
+
+浏览器参数为下拉选择（chrome/brave/edge/arc/chromium/opera/vivaldi/all）。
+
+**安装（本地导入）**：
+
+1. 先构建并安装二进制（extension 会调用它）：
    ```bash
    swift build -c release --product media-pause
    ln -sf "$PWD/.build/release/media-pause" ~/bin/media-pause
    ```
-2. 运行辅助脚本（检查二进制 + 在 Finder 中打开脚本目录）：
-   ```bash
-   bash scripts/install-raycast.sh
-   ```
-3. 在 **Raycast / Raycast Beta** 中：设置 Settings → Extensions → 点 `+` → **Add Script Directory** → 选择本仓库的 `raycast/` 目录。
+2. 在 **Raycast / Raycast Beta** 中：`+` → **Import Extension** → 选择本仓库的 `extension/` 目录。
+3. （可选）开发热更新：`cd extension && npm install && npm run dev`
 
-> Raycast stable 与 Raycast 2.0 Beta 是两个独立应用，需分别添加脚本目录。
-> 脚本**不依赖 PATH**：Raycast 运行脚本的环境 PATH 很精简（官方只追加 `/usr/local/bin`，不含 `~/bin` 或 `/opt/homebrew/bin`），`raycast/_media-pause-lib.sh` 会显式在常见安装位置查找二进制。
-
-**命令**（时长可选；浏览器为下拉选择）：
-
-| 命令 | 用途 |
-|------|------|
-| `Pause Media` | 暂停媒体（无时长=立即暂停） |
-| `Resume Media` | 恢复播放（可带时长，到时再暂停） |
-| `Mute Tabs` | 倒计时后静音标签页（默认 1h） |
-| `Quit Browser` | 倒计时后退出浏览器（默认 1h） |
-| `Timer Status` | 查看运行中计时器进度 |
-| `Timer Stop` | 停止当前计时器 |
+> Raycast stable 与 Raycast 2.0 Beta 是两个独立应用，需分别导入。
+> extension 会自动在 `~/bin` → `/usr/local/bin` → `/opt/homebrew/bin` 等位置查找 media-pause 二进制，**不依赖 PATH**；设置 `MEDIA_PAUSE_REPO` 环境变量可让它在开发时直接使用仓库 `.build/` 产物。
 
 ### 菜单栏倒计时
 
@@ -152,7 +151,7 @@ Tests/MediaPauseCoreTests/ 单元测试 + 轻量断言框架
 scripts/                   verify.sh（编译测试） / mutate.py（变异测试）
 ```
 
-进程间通信：`/tmp/media-pause.pid`、`/tmp/media-pause.status`（格式见 `IPC.swift`），菜单栏与 Raycast 读取同一格式。
+进程间通信：`/tmp/media-pause.pid`、`/tmp/media-pause.status`（格式见 `IPC.swift`），菜单栏倒计时读取同一格式。
 
 ## 变更记录（v4.0 重构）
 
@@ -161,7 +160,7 @@ scripts/                   verify.sh（编译测试） / mutate.py（变异测�
 - 新增 `status` / `stop` / `setup` 子命令
 - 移除 SIGSTOP 冻结（损坏媒体管线）、`--profile` / `--list-profiles`
 - 新增单元测试（88 个）、编译测试、变异测试
-- 保留 IPC 文件格式，菜单栏 / Raycast 兼容
+- 保留 IPC 文件格式，菜单栏倒计时兼容
 
 ## 许可
 

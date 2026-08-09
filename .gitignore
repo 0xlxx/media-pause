@@ -23,3 +23,9 @@ menu-bar/CountdownTimer.app/
 # Local secrets & run data
 .env
 .pi/
+
+# Raycast extension
+extension/node_modules/
+extension/dist/
+extension/dev/
+extension/.extension/

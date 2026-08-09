@@ -1,0 +1,120 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "media-pause",
+  "title": "Media Pause",
+  "description": "Pause and resume Chrome audio/video on a timer",
+  "icon": "icon.png",
+  "author": "lxxorz",
+  "categories": ["Productivity", "Media"],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "pause-media",
+      "title": "Pause Media",
+      "description": "Pause media in browser tabs, immediately or after a countdown",
+      "mode": "no-view",
+      "keywords": ["pause", "video", "media", "countdown", "timer"],
+      "arguments": [
+        { "name": "duration", "placeholder": "Duration (e.g. 30m), empty = now", "type": "text", "required": false },
+        { "name": "browser", "placeholder": "Browser", "type": "dropdown", "required": false, "data": [
+          { "title": "Chrome", "value": "chrome" },
+          { "title": "Brave", "value": "brave" },
+          { "title": "Edge", "value": "edge" },
+          { "title": "Arc", "value": "arc" },
+          { "title": "Chromium", "value": "chromium" },
+          { "title": "Opera", "value": "opera" },
+          { "title": "Vivaldi", "value": "vivaldi" },
+          { "title": "All", "value": "all" }
+        ] }
+      ]
+    },
+    {
+      "name": "resume-media",
+      "title": "Resume Media",
+      "description": "Resume media in browser tabs, or auto-pause after a duration",
+      "mode": "no-view",
+      "keywords": ["resume", "play", "media", "timer"],
+      "arguments": [
+        { "name": "duration", "placeholder": "Duration (e.g. 10s), empty = resume now", "type": "text", "required": false },
+        { "name": "browser", "placeholder": "Browser", "type": "dropdown", "required": false, "data": [
+          { "title": "Chrome", "value": "chrome" },
+          { "title": "Brave", "value": "brave" },
+          { "title": "Edge", "value": "edge" },
+          { "title": "Arc", "value": "arc" },
+          { "title": "Chromium", "value": "chromium" },
+          { "title": "Opera", "value": "opera" },
+          { "title": "Vivaldi", "value": "vivaldi" },
+          { "title": "All", "value": "all" }
+        ] }
+      ]
+    },
+    {
+      "name": "mute-tabs",
+      "title": "Mute Tabs",
+      "description": "Mute audible browser tabs, immediately or after a countdown",
+      "mode": "no-view",
+      "keywords": ["mute", "silent", "audio"],
+      "arguments": [
+        { "name": "duration", "placeholder": "Duration (e.g. 30m), empty = now", "type": "text", "required": false },
+        { "name": "browser", "placeholder": "Browser", "type": "dropdown", "required": false, "data": [
+          { "title": "Chrome", "value": "chrome" },
+          { "title": "Brave", "value": "brave" },
+          { "title": "Edge", "value": "edge" },
+          { "title": "Arc", "value": "arc" },
+          { "title": "Chromium", "value": "chromium" },
+          { "title": "Opera", "value": "opera" },
+          { "title": "Vivaldi", "value": "vivaldi" },
+          { "title": "All", "value": "all" }
+        ] }
+      ]
+    },
+    {
+      "name": "quit-browser",
+      "title": "Quit Browser",
+      "description": "Quit the browser, immediately or after a countdown",
+      "mode": "no-view",
+      "keywords": ["quit", "close", "browser"],
+      "arguments": [
+        { "name": "duration", "placeholder": "Duration (e.g. 1h), empty = now", "type": "text", "required": false },
+        { "name": "browser", "placeholder": "Browser", "type": "dropdown", "required": false, "data": [
+          { "title": "Chrome", "value": "chrome" },
+          { "title": "Brave", "value": "brave" },
+          { "title": "Edge", "value": "edge" },
+          { "title": "Arc", "value": "arc" },
+          { "title": "Chromium", "value": "chromium" },
+          { "title": "Opera", "value": "opera" },
+          { "title": "Vivaldi", "value": "vivaldi" },
+          { "title": "All", "value": "all" }
+        ] }
+      ]
+    },
+    {
+      "name": "timer-status",
+      "title": "Timer Status",
+      "description": "Show the running timer's remaining time",
+      "mode": "no-view",
+      "keywords": ["timer", "status", "progress"]
+    },
+    {
+      "name": "timer-stop",
+      "title": "Timer Stop",
+      "description": "Stop the running timer",
+      "mode": "no-view",
+      "keywords": ["timer", "stop", "cancel"]
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.104.24"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17",
+    "@types/react": "^19.0.10",
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "build": "ray build",
+    "dev": "ray develop",
+    "lint": "ray lint",
+    "publish": "npx @raycast/api@latest publish"
+  }
+}
