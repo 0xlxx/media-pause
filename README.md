@@ -59,7 +59,6 @@ brew install 0xlxx/homebrew-tap/media-pause   # 待 v4.0.0 tag 后可用
 | `Resume Media` | 恢复播放（可带时长，到时再暂停） |
 | `Mute Tabs` | 倒计时后静音标签页（默认 1h） |
 | `Quit Browser` | 倒计时后退出浏览器（默认 1h） |
-| `Play/Pause Key` | 发送系统媒体键（默认 1h） |
 | `Timer Status` | 查看运行中计时器进度 |
 | `Timer Stop` | 停止当前计时器 |
 
