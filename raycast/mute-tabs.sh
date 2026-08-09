@@ -2,15 +2,19 @@
 # Required parameters:
 # @raycast.schemaVersion 1
 # @raycast.title Mute Tabs
-# @raycast.mode compact
+# @raycast.mode fullOutput
 # @raycast.icon icon-mute.png
 # @raycast.packageName Media Timer
 # @raycast.author 0xlxx
 # @raycast.keywords timer mute silent audio
 
 # Optional parameters:
-# @raycast.argument1 { "type": "text", "placeholder": "Duration (optional): 30m | 1h", "optional": true }
-# @raycast.argument2 { "type": "text", "placeholder": "Browser: chrome, brave, all (default: chrome)", "optional": true }
+# @raycast.argument1 { "type": "text", "placeholder": "Duration (default 1h)", "optional": true }
+# @raycast.argument2 { "type": "dropdown", "placeholder": "Browser", "data": [{"title": "Chrome", "value": "chrome"}, {"title": "Brave", "value": "brave"}, {"title": "Edge", "value": "edge"}, {"title": "Arc", "value": "arc"}, {"title": "Chromium", "value": "chromium"}, {"title": "Opera", "value": "opera"}, {"title": "Vivaldi", "value": "vivaldi"}, {"title": "All", "value": "all"}] }
+
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_media-pause-lib.sh"
+MP="$(mp_require)" || exit 1
 
 BROWSER="${2:-chrome}"
-exec media-pause -m -b "$BROWSER" "$1"
+exec "$MP" -m -b "$BROWSER" "${1:-1h}"

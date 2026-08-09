@@ -33,17 +33,33 @@ ln -sf "$PWD/.build/release/media-pause" ~/bin/media-pause
 brew install 0xlxx/homebrew-tap/media-pause   # 待 v4.0.0 tag 后可用
 ```
 
-### Raycast 集成
+### Raycast 集成（支持 Raycast 2.0 Beta）
 
-将 `raycast/` 目录加入 Raycast 脚本目录：
+把仓库的 `raycast/` 目录添加为 Raycast 的 **Script Directory**：
+
+1. 先构建并安装二进制（一次性）：
+   ```bash
+   swift build -c release --product media-pause
+   ln -sf "$PWD/.build/release/media-pause" ~/bin/media-pause
+   ```
+2. 运行辅助脚本（检查二进制 + 在 Finder 中打开脚本目录）：
+   ```bash
+   bash scripts/install-raycast.sh
+   ```
+3. 在 **Raycast / Raycast Beta** 中：设置 Settings → Extensions → 点 `+` → **Add Script Directory** → 选择本仓库的 `raycast/` 目录。
+
+> Raycast stable 与 Raycast 2.0 Beta 是两个独立应用，需分别添加脚本目录。
+> 脚本**不依赖 PATH**：Raycast 运行脚本的环境 PATH 很精简（官方只追加 `/usr/local/bin`，不含 `~/bin` 或 `/opt/homebrew/bin`），`raycast/_media-pause-lib.sh` 会显式在常见安装位置查找二进制。
+
+**命令**（时长可选；浏览器为下拉选择）：
 
 | 命令 | 用途 |
 |------|------|
 | `Pause Media` | 暂停媒体（无时长=立即暂停） |
 | `Resume Media` | 恢复播放（可带时长，到时再暂停） |
-| `Mute Tabs` | 倒计时后静音标签页 |
-| `Quit Browser` | 倒计时后退出浏览器 |
-| `Play/Pause Key` | 发送系统媒体键 |
+| `Mute Tabs` | 倒计时后静音标签页（默认 1h） |
+| `Quit Browser` | 倒计时后退出浏览器（默认 1h） |
+| `Play/Pause Key` | 发送系统媒体键（默认 1h） |
 | `Timer Status` | 查看运行中计时器进度 |
 | `Timer Stop` | 停止当前计时器 |
 

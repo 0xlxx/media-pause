@@ -11,4 +11,8 @@
 # Optional parameters:
 # @raycast.argument1 { "type": "text", "placeholder": "Duration (default 1h)", "optional": true }
 
-exec media-pause -p "${1:-1h}"
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_media-pause-lib.sh"
+MP="$(mp_require)" || exit 1
+
+exec "$MP" -p "${1:-1h}"

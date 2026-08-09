@@ -8,4 +8,8 @@
 # @raycast.author 0xlxx
 # @raycast.keywords timer stop cancel
 
-exec media-pause stop
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_media-pause-lib.sh"
+MP="$(mp_require)" || exit 1
+
+exec "$MP" stop
