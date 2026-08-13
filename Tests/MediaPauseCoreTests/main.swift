@@ -115,7 +115,7 @@ let tests: [(String, () throws -> Void)] = [
     ("report summary failure", testReportSummaryFailure),
 
     // Completion notification
-    ("notification default on", testNotificationDefaultOn),
+    ("notification default off", testNotificationDefaultOff),
     ("notification flags", testNotificationFlags),
     ("notification titles", testNotificationTitles),
     ("notification bodies", testNotificationBodies),

@@ -18,8 +18,8 @@ public enum HelpText {
                                 Comma-separated: -b chrome,brave · All: -b all
           -n, --now             Execute immediately (skip countdown)
           --notify              Show a system notification with sound when the
-                                countdown finishes (default)
-          --no-notify           Disable the completion notification
+                                countdown finishes (off by default)
+          --no-notify           Explicitly disable the completion notification
           -h, --help            Show this help
           -V, --version         Show version
 

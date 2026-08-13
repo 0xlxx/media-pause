@@ -1,17 +1,18 @@
 @testable import MediaPauseCore
 
-func testNotificationDefaultOn() throws {
+func testNotificationDefaultOff() throws {
     let config = try actionOf([])
-    try checkTrue(config.notify, "notify 默认应开启")
+    try checkFalse(config.notify, "notify 默认应关闭（显式 --notify 启用）")
+    try checkFalse(try actionOf(["30m"]).notify)
 }
 
 func testNotificationFlags() throws {
-    try checkFalse(try actionOf(["--no-notify"]).notify)
     try checkTrue(try actionOf(["--notify"]).notify)
+    try checkFalse(try actionOf(["--no-notify"]).notify)
     try checkTrue(try actionOf(["--no-notify", "--notify"]).notify)  // 后者覆盖前者
     try checkFalse(try actionOf(["--notify", "--no-notify"]).notify)
-    try checkFalse(try actionOf(["--no-notify", "30m"]).notify)
     try checkTrue(try actionOf(["--notify", "30m"]).notify)
+    try checkFalse(try actionOf(["--no-notify", "30m"]).notify)
 }
 
 func testNotificationTitles() throws {
