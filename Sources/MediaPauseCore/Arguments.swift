@@ -32,12 +32,16 @@ public struct ActionConfig: Equatable {
     public var browserTokens: [String]
     public var duration: String?
     public var now: Bool
+    /// Whether to show a system notification (with sound) when the countdown
+    /// finishes. Defaults to true; disable with `--no-notify`.
+    public var notify: Bool
 
-    public init(mode: Mode = .pause, browserTokens: [String] = [], duration: String? = nil, now: Bool = false) {
+    public init(mode: Mode = .pause, browserTokens: [String] = [], duration: String? = nil, now: Bool = false, notify: Bool = true) {
         self.mode = mode
         self.browserTokens = browserTokens
         self.duration = duration
         self.now = now
+        self.notify = notify
     }
 }
 
@@ -49,6 +53,7 @@ public enum Arguments {
         var browserTokens: [String] = []
         var duration: String?
         var now = false
+        var notify = true
 
         var i = 0
         while i < args.count {
@@ -66,6 +71,10 @@ public enum Arguments {
                 return .success(.stop)
             case "-n", "--now":
                 now = true
+            case "--notify":
+                notify = true
+            case "--no-notify":
+                notify = false
             case "-r", "--resume":
                 mode = .resume
             case "-p", "--playpause":
@@ -89,6 +98,6 @@ public enum Arguments {
             }
             i += 1
         }
-        return .success(.action(ActionConfig(mode: mode, browserTokens: browserTokens, duration: duration, now: now)))
+        return .success(.action(ActionConfig(mode: mode, browserTokens: browserTokens, duration: duration, now: now, notify: notify)))
     }
 }

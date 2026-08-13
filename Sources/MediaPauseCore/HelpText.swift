@@ -17,6 +17,9 @@ public enum HelpText {
           -b, --browser <name>  Target browser(s) (default: chrome)
                                 Comma-separated: -b chrome,brave · All: -b all
           -n, --now             Execute immediately (skip countdown)
+          --notify              Show a system notification with sound when the
+                                countdown finishes (default)
+          --no-notify           Disable the completion notification
           -h, --help            Show this help
           -V, --version         Show version
 

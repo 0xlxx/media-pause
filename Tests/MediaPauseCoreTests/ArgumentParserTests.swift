@@ -13,7 +13,7 @@ private func modeOf(_ args: [String]) throws -> Mode {
     return config.mode
 }
 
-private func actionOf(_ args: [String]) throws -> ActionConfig {
+func actionOf(_ args: [String]) throws -> ActionConfig {
     let command = try parse(args)
     guard case .action(let config) = command else { throw TestFailure("expected action command") }
     return config

@@ -86,6 +86,7 @@ media-pause status | stop | setup
 | `-q, --quit` | 倒计时结束后退出浏览器 |
 | `-b, --browser` | 指定浏览器（`chrome,brave`、`all`），默认 chrome |
 | `-n, --now` | 立即执行，跳过倒计时 |
+| `--notify` / `--no-notify` | 倒计时完成时发送系统通知并播放声音（默认开启）/ 关闭 |
 
 ### 命令
 

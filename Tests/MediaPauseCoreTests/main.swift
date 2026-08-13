@@ -113,6 +113,14 @@ let tests: [(String, () throws -> Void)] = [
     ("report line formats", testReportLineFormats),
     ("report summary success", testReportSummarySuccess),
     ("report summary failure", testReportSummaryFailure),
+
+    // Completion notification
+    ("notification default on", testNotificationDefaultOn),
+    ("notification flags", testNotificationFlags),
+    ("notification titles", testNotificationTitles),
+    ("notification bodies", testNotificationBodies),
+    ("notification script", testNotificationScript),
+    ("notification script escapes quotes", testNotificationScriptEscapesQuotes),
 ]
 
 var failures: [String] = []

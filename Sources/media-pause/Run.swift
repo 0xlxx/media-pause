@@ -300,9 +300,19 @@ private func executeModeAction(mode: Mode, browsers: [Browser], runner: ProcessR
     }
 }
 
+/// Posts a completion notification (with sound) via AppleScript's
+/// `display notification`. Best-effort: failures are ignored.
+private func postCompletionNotification(mode: Mode, label: String, runner: ProcessRunning) {
+    let script = CompletionNotification.script(
+        title: CompletionNotification.title(for: mode),
+        body: CompletionNotification.body(for: mode, label: label)
+    )
+    _ = runner.run("/usr/bin/osascript", ["-e", script], timeout: 5)
+}
+
 // MARK: - Countdown
 
-private func runCountdown(totalSeconds: Int, mode: Mode, browsers: [Browser], runner: ProcessRunning, store: TimerStateStore) -> Int32 {
+private func runCountdown(totalSeconds: Int, mode: Mode, browsers: [Browser], runner: ProcessRunning, store: TimerStateStore, notify: Bool) -> Int32 {
     setupSignals()
     let activity = ProcessInfo.processInfo.beginActivity(
         options: [.background, .idleSystemSleepDisabled],
@@ -398,6 +408,9 @@ private func runCountdown(totalSeconds: Int, mode: Mode, browsers: [Browser], ru
 
     if tty { print(clearScreen() + cursorHome(), terminator: ""); fflush(stdout) }
     let ok = executeModeAction(mode: mode, browsers: browsers, runner: runner, store: store)
+    if notify && ok {
+        postCompletionNotification(mode: mode, label: label, runner: runner)
+    }
     print("")
     print(showCursor(), terminator: "")
     fflush(stdout)
@@ -549,7 +562,7 @@ enum MediaPauseApp {
                     fputs("Error: \(errorDescription(error))\n", stderr)
                     return 1
                 case .success(let seconds):
-                    return runCountdown(totalSeconds: seconds, mode: .pause, browsers: browsers, runner: runner, store: store)
+                    return runCountdown(totalSeconds: seconds, mode: .pause, browsers: browsers, runner: runner, store: store, notify: config.notify)
                 }
             }
             return ok ? 0 : 1
@@ -570,7 +583,7 @@ enum MediaPauseApp {
         case .success(let value):
             seconds = value
         }
-        return runCountdown(totalSeconds: seconds, mode: config.mode, browsers: browsers, runner: runner, store: store)
+        return runCountdown(totalSeconds: seconds, mode: config.mode, browsers: browsers, runner: runner, store: store, notify: config.notify)
     }
 
     private static func errorDescription(_ error: DurationParseError) -> String {
